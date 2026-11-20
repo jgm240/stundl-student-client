@@ -32,3 +32,6 @@ binary sensors and a calendar. See `homeassistant/README.md`.
 No password is ever stored. The WebUntis session and the Parent link secret are kept in the macOS Keychain, not in
 files; the data folder is private to your account; the local app server only answers the window the app opened; browser
 sign-in sessions are deleted after each login/sync; the Parent site is read-only and answers only your home network.
+
+## License
+MIT - see `LICENSE`. Third-party notices: `THIRD_PARTY_LICENSES.md`.
