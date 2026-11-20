@@ -1,0 +1,8 @@
+{
+  "config": {
+    "step": { "user": { "title": "Stundl Student Client (SSC)", "description": "On your Mac: SSC → Settings → Parent mode → Copy link. Paste the browser link here.", "data": { "url": "Parent link" } } },
+    "error": { "invalid_link": "That isn't an SSC Parent link (http://…:8766/p/<code>/ on your home network).", "cannot_connect": "Can't reach SSC at that link. Is Parent mode on and the Mac awake?" },
+    "abort": { "already_configured": "This Parent link is already set up." }
+  },
+  "options": { "step": { "init": { "data": { "scan_minutes": "How often to fetch (minutes)" } } } }
+}

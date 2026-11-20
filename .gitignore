@@ -1,0 +1,14 @@
+dist/
+build/
+.venv/
+__pycache__/
+*.pyc
+*.spec
+widget/build/
+widget/*.xcodeproj
+ios/build/
+ios/Payload/
+ios/*.xcodeproj
+ios/Info.plist
+ios/*.ipa
+.DS_Store

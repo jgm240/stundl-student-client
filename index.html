@@ -1,0 +1,259 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Stundl Student Client</title>
+<style>
+:root{--fg:#14161a;--mut:rgba(20,22,26,.6);--acc:#0a84ff;--bad:#ff453a;--ok:#30d158;--warn:#ff9f0a;
+ --glass:rgba(255,255,255,.34);--glass2:rgba(255,255,255,.52);--edge:rgba(255,255,255,.65);--shadow:rgba(30,40,80,.18);
+ --bg1:#cfe3ff;--bg2:#f6d9ff;--bg3:#d4fbe8}
+@media(prefers-color-scheme:dark){:root{--fg:#f2f4f8;--mut:rgba(242,244,248,.62);--acc:#64d2ff;--bad:#ff6961;--ok:#4cd964;--warn:#ffd60a;
+ --glass:rgba(40,44,58,.38);--glass2:rgba(70,76,96,.5);--edge:rgba(255,255,255,.22);--shadow:rgba(0,0,0,.45);
+ --bg1:#0b1530;--bg2:#2a1240;--bg3:#0c2a2a}}
+*{box-sizing:border-box}
+body{margin:0;font:14px -apple-system,BlinkMacSystemFont,system-ui,sans-serif;color:var(--fg);min-height:100vh;
+ background:radial-gradient(60vw 50vh at 12% 8%,var(--bg1),transparent 70%),radial-gradient(55vw 55vh at 90% 20%,var(--bg2),transparent 70%),
+ radial-gradient(60vw 50vh at 50% 100%,var(--bg3),transparent 70%),var(--bg1);background-attachment:fixed}
+body.native{background:transparent}
+.glass,.ent,.item,header,button,select,input[type=search],input[type=text],input[type=date],input[type=time],input[type=number],pre{
+ background:var(--glass);backdrop-filter:blur(26px) saturate(180%);-webkit-backdrop-filter:blur(26px) saturate(180%);
+ border:1px solid var(--edge);box-shadow:inset 0 1px 0 rgba(255,255,255,.55),inset 0 -1px 0 rgba(255,255,255,.08),0 8px 24px var(--shadow)}
+header{display:flex;gap:8px;align-items:center;padding:10px 14px;flex-wrap:wrap;position:sticky;top:10px;margin:10px 14px 0;border-radius:24px;z-index:2}
+h1{font-size:17px;margin:0 8px 0 4px;font-weight:700}
+button,select,input[type=search],input[type=text],input[type=date],input[type=time],input[type=number]{color:var(--fg);padding:6px 14px;border-radius:999px;font:inherit;box-shadow:inset 0 1px 0 rgba(255,255,255,.5),0 2px 8px var(--shadow);transition:transform .15s,background .2s}
+button{cursor:pointer}button:hover{background:var(--glass2);transform:translateY(-1px)}button:active{transform:scale(.97)}
+button.on{background:var(--acc);color:#fff;border-color:rgba(255,255,255,.5);box-shadow:inset 0 1px 0 rgba(255,255,255,.6),0 4px 14px var(--acc)}
+.sp{margin-left:auto}.mut{color:var(--mut)}
+main{padding:18px 14px 40px;max-width:1150px;margin:auto}
+.week{display:grid;grid-template-columns:repeat(5,1fr);gap:10px}
+@media(max-width:800px){.week{grid-template-columns:1fr}}
+.day h3{margin:0 0 6px 4px;font-size:12px;color:var(--mut);text-transform:uppercase;letter-spacing:.04em}
+.ent{border-radius:16px;padding:8px 11px;margin-bottom:8px;position:relative;overflow:hidden}
+.ent::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--acc)}
+.ent.x::before{background:var(--bad)}.ent.x{opacity:.7}.ent.x b{text-decoration:line-through}
+.ent small,.item small{color:var(--mut);display:block}
+.item{border-radius:18px;padding:11px 14px;margin-bottom:9px;display:flex;gap:11px;align-items:flex-start}
+.item.done{opacity:.5}.item .b{flex:1}
+input[type=checkbox]{accent-color:var(--acc);width:18px;height:18px;margin-top:2px}
+.badge{display:inline-block;font-size:11px;padding:1px 9px;border-radius:99px;background:var(--acc);color:#fff;margin-right:6px}
+.badge.grade{background:var(--ok)}.badge.homework{background:var(--warn)}.badge.timetable{background:var(--bad)}
+h2{font-size:15px;margin:20px 4px 9px}
+.bub{padding:7px 12px;border-radius:16px;margin:5px 0;max-width:78%;background:var(--glass2);word-wrap:break-word}.bub small{display:block;font-size:11px}.bub.me{margin-left:auto;background:var(--acc);color:#fff}.bub.me small{color:rgba(255,255,255,.75)}
+@media(max-width:800px){.chatgrid{grid-template-columns:1fr!important}}
+.new{border-color:var(--acc);box-shadow:inset 0 1px 0 rgba(255,255,255,.55),0 0 0 2px var(--acc),0 8px 24px var(--shadow)}
+table{border-collapse:separate;border-spacing:0;width:100%;border-radius:18px;overflow:hidden;background:var(--glass);backdrop-filter:blur(26px) saturate(180%);-webkit-backdrop-filter:blur(26px) saturate(180%);border:1px solid var(--edge)}
+td,th{text-align:left;padding:7px 12px;border-bottom:1px solid rgba(255,255,255,.2)}
+#banner{margin:10px 14px 0;padding:8px 16px;border-radius:18px;max-width:1122px;margin-left:auto;margin-right:auto;font-size:13px}
+.bar{display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap}
+pre{white-space:pre-wrap;padding:10px;border-radius:14px;font-size:12px}
+@supports not (backdrop-filter:blur(1px)){:root{--glass:rgba(255,255,255,.85)}}
+</style></head><body>
+<header><h1 title="English: SSC Student Client">Stundl Student Client</h1><span id="tabs"></span>
+<span class="sp mut" id="stamp"></span>
+<select id="exp"><option value="">Export…</option><option value="ics">Calendar (.ics)</option><option value="homework">Homework CSV</option><option value="exams">Exams CSV</option><option value="grades">Grades CSV</option><option value="absences">Absences CSV</option></select>
+<button id="sync" onclick="doSync()">Sync now</button></header>
+<div id="banner" class="glass" style="display:none"></div>
+<main id="main">Loading…</main>
+<script>
+if(location.search.includes("native"))document.body.classList.add("native");
+let S={},tab="today",wk=null,hwFilter="todo",hwStatus="",hwSub="",syncing=false,q="",hits=[];
+const $=s=>document.querySelector(s),esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const TABS={today:"Today",tt:"Timetable",hw:"Homework",ex:"Exams",gr:"Grades & absences",ch:"Changes",pl:"Study plan",pe:"Teachers & rooms",ms:"Messages",se:"Search",set:"Settings"};
+const iso=d=>d.toISOString().slice(0,10),dayName=s=>new Date(s+"T12:00").toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"short"});
+const SNAP=window.__SNAPSHOT__;
+const post=(u,b)=>SNAP?Promise.resolve():fetch(u,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b||{})});
+const empty=()=>`<p class="mut">No data yet. Press “Sync now”.</p>`;
+const ent=e=>`<div class="ent ${e.cancelled?"x":""}"><b>${esc(e.subject||"Lesson")}</b> ${esc(e.room)}<small>${e.start.slice(11,16)}–${e.end.slice(11,16)} · ${esc(e.teacher)}${e.cancelled?" · CANCELLED":""}</small>${e.info?`<small>${esc(e.info)}</small>`:""}</div>`;
+const allEntries=()=>Object.values(S.timetable||{}).flat();
+function today(){
+  const t=iso(new Date()),tm=iso(new Date(Date.now()+864e5)),es=allEntries();
+  const day=d=>{const l=es.filter(e=>e.date===d);return `<h2>${dayName(d)}</h2>`+(l.map(ent).join("")||`<p class="mut">No lessons.</p>`)};
+  const ord={missed:0,soon:1,pending:2},hw=S.homework.filter(h=>!h.dismissed&&h.status!=="done").sort((a,b)=>ord[a.status]-ord[b.status]||(a.due<b.due?-1:1)).slice(0,8);
+  const ch=S.changes.filter(c=>!c.seen).slice(0,10);
+  return (ch.length?`<h2>New changes</h2>`+ch.map(chItem).join("")+`<button onclick="post('/api/seen').then(load)">Mark all seen</button>`:"")+
+   limitsWarn()+planToday()+day(t)+day(tm)+`<h2>Homework ${hwChips()}</h2>`+(hw.map(hwItem).join("")||`<p class="mut">Nothing open.</p>`);
+}
+let fT="",fR="",fS="";
+function tt(){
+  const ws=Object.keys(S.timetable||{}).sort(); if(!ws.length)return empty();
+  if(!ws.includes(wk)){const t=iso(new Date());wk=[...ws].reverse().find(w=>w<=t)||ws[0]}
+  const all=allEntries(),opts=k=>[...new Set(all.flatMap(e=>String(e[k]).split(", ")).filter(Boolean))].sort();
+  const sel=(v,k,l,set)=>`<select onchange="${set}=this.value;render()"><option value="">${l}</option>${opts(k).map(o=>`<option ${o===v?"selected":""}>${esc(o)}</option>`).join("")}</select>`;
+  const has=(e,k,v)=>!v||String(e[k]).split(", ").includes(v);
+  const days={};(S.timetable[wk]||[]).filter(e=>has(e,"teacher",fT)&&has(e,"room",fR)&&has(e,"subject",fS)).forEach(e=>(days[e.date]=days[e.date]||[]).push(e));
+  return `<div class="bar"><button onclick="shift(-1)">←</button><b>Week of ${wk}</b><button onclick="shift(1)">→</button>
+   ${sel(fS,"subject","All subjects","fS")}${sel(fT,"teacher","All teachers","fT")}${sel(fR,"room","All rooms","fR")}</div><div class="week">`+
+   Object.keys(days).sort().map(d=>`<div class="day"><h3>${dayName(d)}</h3>${days[d].map(ent).join("")}</div>`).join("")+`</div>`;
+}
+function shift(n){const ws=Object.keys(S.timetable).sort(),i=ws.indexOf(wk)+n;if(ws[i]){wk=ws[i];render()}}
+const HWL={missed:"Missed",soon:"Due soon",pending:"Pending",done:"Done"},HWC={missed:"var(--bad)",soon:"var(--warn)",pending:"var(--acc)",done:"var(--ok)"};
+function dueText(h){const d=h.days_left;if(d===null||d===undefined)return "due "+h.due;
+  if(d===0)return "due today";if(d===1)return "due tomorrow";if(d>1)return "due in "+d+" days ("+h.due.slice(5)+")";
+  return (-d)+" day"+(d===-1?"":"s")+" overdue ("+h.due.slice(5)+")"}
+const hwChips=()=>{const m=S.homework_summary||{};return ["missed","soon","pending","done"].filter(k=>m[k]).map(k=>`<span class="badge" style="background:${HWC[k]}">${m[k]} ${HWL[k].toLowerCase()}</span>`).join(" ")};
+function hwItem(h){return `<div class="item ${h.status==="done"?"done":""}" style="border-left:4px solid ${HWC[h.status]}"><input type="checkbox" ${h.done?"checked":""} ${SNAP?"disabled":""} onchange="toggle('${esc(h.id)}',this.checked)" title="Mark done on this Mac">
+  <div class="b"><span class="badge" style="background:${HWC[h.status]}">${HWL[h.status]}</span><b>${esc(h.subject)}</b> <small style="display:inline;${h.status==="missed"?"color:var(--bad)":""}">${esc(dueText(h))}</small>
+  <div>${esc(h.text)}</div>${h.remark?`<small>${esc(h.remark)}</small>`:""}${h.dismissed?`<small>dismissed ${h.dismiss_reason==="manual"?"by you":"automatically ("+(h.dismiss_reason==="done"?"done":"missed too long")+")"}</small>`:""}</div>
+  ${SNAP?"":`<button onclick="planFromHw('${esc(h.id)}')" title="Add to study plan">+ Plan</button>${h.dismissed?`<button onclick="hwDismiss('${esc(h.id)}',true)">Restore</button>`:`<button onclick="hwDismiss('${esc(h.id)}')" title="Hide this homework">Dismiss</button>`}`}</div>`}
+async function hwDismiss(id,restore){await post("/api/homework/"+(restore?"restore":"dismiss"),{id});await load()}
+function hw(){
+  if(!S.homework.length)return empty();
+  const sm=S.homework_summary||{},subs=[...new Set(S.homework.map(h=>h.subject))].filter(Boolean).sort();
+  const base=S.homework.filter(h=>!hwSub||h.subject===hwSub);
+  const pick={todo:h=>!h.dismissed&&h.status!=="done",done:h=>h.status==="done",dismissed:h=>h.dismissed,all:()=>true}[hwFilter];
+  const cnt={todo:(sm.missed||0)+(sm.soon||0)+(sm.pending||0),done:S.homework.filter(h=>h.status==="done").length,dismissed:sm.dismissed||0,all:S.homework.length};
+  const l=base.filter(pick).filter(h=>!hwStatus||h.status===hwStatus);
+  const tabs=Object.entries({todo:"To do",done:"Done",dismissed:"Dismissed",all:"All"}).map(([k,v])=>`<button class="${hwFilter===k?"on":""}" onclick="hwFilter='${k}';hwStatus='';render()">${v} (${cnt[k]})</button>`).join("");
+  const chips=["missed","soon","pending","done"].map(k=>`<button class="${hwStatus===k?"on":""}" style="border-left:4px solid ${HWC[k]}" onclick="hwStatus=hwStatus==='${k}'?'':'${k}';render()">${HWL[k]} ${sm[k]||0}</button>`).join("");
+  const order=["missed","soon","pending","done"];
+  const groups=hwFilter==="dismissed"?[["",l.slice().sort((a,b)=>a.due<b.due?1:-1)]]:order.map(k=>[k,l.filter(h=>h.status===k).sort((a,b)=>a.due<b.due?-1:1)]).filter(g=>g[1].length);
+  return `<div class="bar">${tabs}<select onchange="hwSub=this.value;render()"><option value="">All subjects</option>${subs.map(s=>`<option ${s===hwSub?"selected":""}>${esc(s)}</option>`).join("")}</select></div>
+   <div class="bar">${chips}<span class="mut">Done and long-missed homework is dismissed automatically (change this in Settings).</span></div>`+
+   (groups.map(([k,items])=>(k?`<h2 style="color:${HWC[k]}">${HWL[k]} · ${items.length}</h2>`:"")+items.map(hwItem).join("")).join("")||`<p class="mut">Nothing here.</p>`);
+}
+function hwSettings(){if(SNAP)return "";const c=S.homework_cfg||{soon_days:2,dismiss_done:true,dismiss_missed_days:7};
+  return `<h2>Homework</h2><div class="item"><div class="b"><p class="mut">The status (done / due soon / pending / missed) comes from WebUntis when it reports one; otherwise it's worked out from the due date.</p>
+   <div class="bar"><label>"Due soon" means due within <input type="number" id="hs1" min="0" max="14" style="width:70px" value="${c.soon_days}"> days</label></div>
+   <div class="bar"><label><input type="checkbox" id="hs2" ${c.dismiss_done?"checked":""}> Dismiss homework automatically once it is done</label></div>
+   <div class="bar"><label>Dismiss missed homework <input type="number" id="hs3" min="-1" max="365" style="width:80px" value="${c.dismiss_missed_days}"> days after its due date</label><small class="mut">(-1 = never)</small></div>
+   <button class="on" onclick="saveHwCfg()">Save</button></div></div>`}
+async function saveHwCfg(){const r=await post("/api/homework/settings",{soon_days:+$("#hs1").value,dismiss_done:$("#hs2").checked,dismiss_missed_days:+$("#hs3").value});
+  if(!r.ok)return alert((await r.json()).error||"could not save");await load();tab="set";render()}
+async function toggle(id,done){if(SNAP){S.homework.find(h=>h.id===id).done=done;return render()}await post("/api/done",{id,done});await load()}
+function ex(){return S.exams.map(e=>`<div class="item"><div class="b"><b>${esc(e.subject)}</b> <small style="display:inline">${esc(e.date)} ${esc(e.start)}</small><div>${esc(e.text)}</div></div></div>`).join("")||empty()}
+const lvl={ok:"var(--ok)",warn:"var(--warn)",critical:"var(--bad)"};
+function limitsWarn(){const l=S.stats.absences.limits.filter(x=>x.level!=="ok");
+  return l.length?`<h2>Absence warnings</h2>`+l.map(x=>`<div class="item new"><div class="b"><b style="color:${lvl[x.level]}">${esc(x.level.toUpperCase())}</b> ${esc(x.subject)}: missed ${x.missed} of ${x.total} lessons (${Math.round(x.pct*100)}%)</div></div>`).join(""):""}
+function calc(){
+  const s=$("#cs").value,add=$("#ca").value.split(/[ ,;]+/).map(Number).filter(n=>n>=1&&n<=5),tg=parseFloat($("#ct").value);
+  const g=S.stats.grades.find(x=>x.subject===s),nums=(g?g.marks:[]).map(Number).filter(n=>!isNaN(n)),sum=nums.reduce((a,b)=>a+b,0),n=nums.length;
+  let o=`Current average: ${n?(sum/n).toFixed(2):"–"} (${n} marks)`;
+  if(add.length)o+=` · with ${add.join(", ")}: ${((sum+add.reduce((a,b)=>a+b,0))/(n+add.length)).toFixed(2)}`;
+  if(tg){const need=tg*(n+1)-sum;o+=` · to reach ${tg} you need ${need<1?"better than a 1 (not reachable with one more mark)":need>5?"nothing - already safe":"a "+need.toFixed(2)+" or better on the next mark"}`}
+  $("#cr").textContent=o}
+function gr(){
+  const g=S.stats.grades,a=S.stats.absences;
+  return `<h2>Grades</h2>`+(g.length?`<table><tr><th>Subject<th>Average<th>Marks</tr>${g.map(x=>`<tr><td>${esc(x.subject)}<td>${x.average??"–"}<td>${esc(x.marks.join(", "))}`).join("")}</table>
+   <h2>Grade calculator</h2><div class="bar"><select id="cs" onchange="calc()">${g.map(x=>`<option>${esc(x.subject)}</option>`).join("")}</select>
+   <input type="search" id="ca" size="14" placeholder="what if: 2, 3" oninput="calc()"><input type="search" id="ct" size="10" placeholder="target avg" oninput="calc()"></div><p id="cr" class="mut">Enter marks to try or a target average.</p>`:`<p class="mut">No grades synced (your school may not expose them).</p>`)+
+  `<h2>Absences</h2><p>${a.total} total · ${a.excused} excused · ${a.open} open · ${a.days} days</p>`+
+  (a.limits.length?`<table><tr><th>Subject<th>Missed<th>Share<th>Status</tr>${a.limits.map(x=>`<tr><td>${esc(x.subject)}<td>${x.missed}/${x.total}<td>${Math.round(x.pct*100)}%<td style="color:${lvl[x.level]}">${x.level}`).join("")}</table><p class="mut">${esc(a.note)}</p>`:"")+
+  S.absences.map(x=>`<div class="item"><div class="b"><b>${esc(x.start)}${x.end!==x.start?" – "+esc(x.end):""}</b> <small style="display:inline">${x.excused?"excused":"open"}</small><div>${esc(x.reason)}</div></div></div>`).join("");
+}
+let pform=null,showOld=false;
+const pmeta=p=>[p.subject,p.start,p.minutes?p.minutes+" min":""].filter(Boolean).join(" · ");
+function planItem(p){return `<div class="item ${p.done?"done":""}"><input type="checkbox" ${p.done?"checked":""} ${SNAP?"disabled":""} onchange="planDone(${p.id},this.checked)">
+  <div class="b"><b>${esc(p.title)}</b> <small style="display:inline">${esc(pmeta(p))}</small>${p.notes?`<small>${esc(p.notes)}</small>`:""}</div>
+  ${SNAP?"":`<button onclick="planEdit(${p.id})">Edit</button><button onclick="planDel(${p.id})" title="Delete">✕</button>`}</div>`}
+function planToday(){const l=(S.plan||[]).filter(p=>p.date===iso(new Date()));
+  return l.length?`<h2>Study plan for today <small class="mut">${l.reduce((a,p)=>a+p.minutes,0)||""} ${l.some(p=>p.minutes)?"min":""}</small></h2>`+l.map(planItem).join(""):""}
+function planForm(){const f=pform,subs=[...new Set(allEntries().map(e=>e.subject).filter(Boolean))].sort();
+  return `<div class="item new"><div class="b"><div class="bar"><input type="text" id="pt" size="34" placeholder="What to do, e.g. Learn vocabulary unit 4" value="${esc(f.title)}"></div>
+  <div class="bar"><input type="date" id="pd" value="${esc(f.date)}"><input type="time" id="ps" value="${esc(f.start)}"><input type="number" id="pm" min="0" max="720" step="5" style="width:90px" placeholder="min" value="${f.minutes||""}">
+  <input type="text" id="pj" list="sj" size="10" placeholder="Subject" value="${esc(f.subject)}"><datalist id="sj">${subs.map(x=>`<option>${esc(x)}</option>`).join("")}</datalist></div>
+  <div class="bar"><input type="text" id="pn" size="48" placeholder="Notes (optional)" value="${esc(f.notes)}"></div>
+  <div class="bar"><button class="on" onclick="planSave()">${f.id?"Save changes":"Add to plan"}</button><button onclick="pform=null;render()">Cancel</button></div></div></div>`}
+function pl(){
+  const t=iso(new Date()),items=S.plan||[],up=items.filter(p=>p.date>=t),old=items.filter(p=>p.date<t).reverse(),days={};
+  up.forEach(p=>(days[p.date]=days[p.date]||[]).push(p));
+  return `<p class="mut">Your own study plan. You edit it here on the computer; it also shows (read-only) in Parent mode and in the offline copy.</p>`+
+   (SNAP?"":(pform?planForm():`<button class="on" onclick="pnew()">+ Add to study plan</button>`))+
+   (Object.keys(days).sort().map(d=>`<h2>${dayName(d)}${d===t?" · today":""} <small class="mut">${days[d].reduce((a,p)=>a+p.minutes,0)?days[d].reduce((a,p)=>a+p.minutes,0)+" min":""}</small></h2>`+days[d].map(planItem).join("")).join("")||`<p class="mut">Nothing planned yet.</p>`)+
+   (old.length?`<h2><button onclick="showOld=!showOld;render()">${showOld?"Hide":"Show"} earlier (${old.length})</button></h2>`+(showOld?old.slice(0,40).map(planItem).join(""):""):"")}
+function pnew(pre){pform={date:iso(new Date()),start:"",minutes:"",subject:"",title:"",notes:"",...(pre||{})};tab="pl";render();const e=$("#pt");if(e)e.focus()}
+function planEdit(id){pform={...(S.plan||[]).find(x=>x.id===id)};render();const e=$("#pt");if(e)e.focus()}
+async function planSave(){const f=pform,body={title:$("#pt").value,date:$("#pd").value,start:$("#ps").value,minutes:+$("#pm").value||0,subject:$("#pj").value,notes:$("#pn").value};if(f.id)body.id=f.id;
+  const r=await post("/api/plan",body);if(!r.ok)return alert((await r.json()).error||"could not save");pform=null;await load()}
+async function planDone(id,done){await post("/api/plan",{id,done});await load()}
+async function planDel(id){if(confirm("Delete this plan entry?")){await post("/api/plan/delete",{id});await load()}}
+function planFromHw(id){const h=S.homework.find(x=>x.id===id);if(h)pnew({title:h.text.slice(0,110),subject:h.subject,date:iso(new Date())})}
+function pe(){return (S.people||[]).length?`<table><tr><th>Teacher<th>Subjects<th>Rooms<th>Lessons<th>Next lesson</tr>${S.people.map(p=>`<tr><td>${esc(p.name)}<td>${esc(p.subjects.join(", "))}<td>${esc(p.rooms.join(", "))}<td>${p.lessons}<td>${esc(p.next.replace("T"," "))}`).join("")}</table>`:empty()}
+function chItem(c){return `<div class="item ${c.seen?"":"new"}"><div class="b"><span class="badge ${esc(c.kind)}">${esc(c.kind)}</span>${esc(c.text)}<small>${new Date(c.at*1000).toLocaleString("en-GB")}</small></div></div>`}
+const ch=()=>S.changes.map(chItem).join("")||`<p class="mut">No changes recorded yet. Changes appear after the second sync.</p>`;
+const inbox=()=>S.messages.map(m=>`<div class="item"><div class="b"><b>${esc(m.subject)}</b> <small style="display:inline">${esc(m.sender)} · ${esc(m.sent)}</small><div>${esc(m.preview)}</div></div></div>`).join("")||empty();
+const ms=()=>inbox();
+function se(){return `<div class="bar"><input type="search" id="q" size="40" placeholder="Search everything…" value="${esc(q)}" oninput="search(this.value)"></div><div id="hits">${hitsHtml()}</div>`}
+const hitsHtml=()=>hits.map(h=>`<div class="item"><div class="b"><span class="badge">${esc(h.kind)}</span><b>${esc(h.title)}</b> <small style="display:inline">${esc(h.date.slice(0,16))}</small><div>${esc(h.text)}</div></div></div>`).join("");
+function snapSearch(v){
+  const idx=[];Object.values(S.timetable).flat().forEach(e=>idx.push(["lesson",e.start,e.subject+" "+e.teacher+" "+e.room,e.info]));
+  S.homework.forEach(x=>idx.push(["homework",x.due,x.subject,x.text+" "+x.remark]));S.exams.forEach(x=>idx.push(["exam",x.date,x.subject,x.text]));
+  S.messages.forEach(x=>idx.push(["message",x.sent,x.subject,x.sender+" "+x.preview]));S.grades.forEach(x=>idx.push(["grade",x.date,x.subject,x.value+" "+x.text]));
+  const w=v.toLowerCase().split(/\s+/).filter(Boolean);
+  return idx.filter(r=>w.every(t=>r.join(" ").toLowerCase().includes(t))).slice(0,300).map(r=>({kind:r[0],date:r[1]||"",title:r[2],text:r[3]||""}));
+}
+let tmr;function search(v){q=v;clearTimeout(tmr);tmr=setTimeout(async()=>{hits=v.trim()?(SNAP?snapSearch(v):await (await fetch("/api/search?q="+encodeURIComponent(v))).json()):[];$("#hits").innerHTML=hitsHtml()},200)}
+const banner=t=>{const b=$("#banner");b.textContent=t||"";b.style.display=t?"block":"none"};
+const when=()=>S.synced_at?new Date(S.synced_at*1000).toLocaleString("en-GB"):"never";
+function failed(r,auto){const l=(r.log||"").trim().split("\n").filter(Boolean).pop()||"unknown error";
+  banner("Offline mode - couldn't sync ("+l+"). Showing data from "+when()+".")}
+async function doSync(auto){
+  if(SNAP)return alert("This is a static offline copy. Open the app to sync.");
+  if(syncing)return;syncing=true;$("#sync").textContent="Syncing…";if(auto!==true)await post("/api/sync");
+  const t=setInterval(async()=>{try{const r=await (await fetch("/api/sync")).json();if(r.running)return;
+    clearInterval(t);syncing=false;$("#sync").textContent="Sync now";await load();r.ok===false?failed(r):banner("")}catch(e){}},1500);
+}
+$("#exp").onchange=e=>{if(e.target.value)location.href="/export/"+e.target.value;e.target.value=""};
+function render(){
+  const unseen=S.changes.filter(c=>!c.seen).length;
+  $("#tabs").innerHTML=Object.entries(TABS).map(([k,v])=>`<button class="${k==tab?"on":""}" onclick="tab='${k}';render()">${v}${k==="ch"&&unseen?` (${unseen})`:""}</button>`).join(" ");
+  $("#stamp").textContent=S.synced_at?"Synced "+new Date(S.synced_at*1000).toLocaleString("en-GB"):"";
+  const f=document.activeElement&&document.activeElement.id==="q";
+  $("#main").innerHTML=({today,tt,hw,ex,gr,ch,ms,se,pl,pe,set:sett})[tab]();
+  if(tab==="se"&&f)$("#q").focus();
+  const cv=$("#conv");if(cv)cv.scrollTop=cv.scrollHeight;
+  if(tab==="set"&&!SNAP)loadParent();
+}
+let CFG={login:{}},BR=[];
+const lastErr=l=>(l||"").trim().split("\n").filter(x=>x.trim()&&!/^[╔║╚═ ]/.test(x)).pop()||"failed - see ~/.ssc for logs";
+const brSelect=(id,cur)=>`<select id="${id}">${BR.map(b=>`<option value="${b.id}" ${b.id===cur?"selected":""} ${b.installed?"":"disabled"}>${esc(b.label)}${b.installed?"":" (not installed)"}</option>`).join("")}</select>`;
+function aboutCard(){return `<h2>About</h2><div class="item"><div class="b"><p><b>Stundl Student Client</b> (SSC) - English: <b>SSC Student Client</b></p>
+  <p class="mut">An unofficial, independent tool. It is not affiliated with or endorsed by Untis GmbH (WebUntis) or Microsoft. It only reads your own account with your own sign-in.</p></div></div>`}
+function sett(){return sett0()+hwSettings()+aboutCard()}
+function sett0(){return `<h2>Settings</h2><div class="item"><div class="b"><p>School: <b>${esc(CFG.school||"-")}</b> (${esc(CFG.server||"")})</p>
+  <div class="bar">Browser for login: ${brSelect("brs",CFG.browser)}<button onclick="post('/api/browser',{browser:$('#brs').value}).then(()=>alert('Saved. Takes effect at the next login.'))">Save</button></div>
+  <button onclick="setupView()">Choose another school / log in again</button></div></div><div id="pc"></div>`}
+let PM=null;
+async function loadParent(){if(!$("#pc"))return;try{PM=await (await fetch("/api/parent")).json()}catch(e){return}renderParent()}
+const SECN={today:"Today",timetable:"Timetable",homework:"Homework",exams:"Exams",plan:"Study plan",changes:"Changes",grades:"Grades",absences:"Absences"};
+function renderParent(){const el=$("#pc");if(!el||!PM)return;
+  const links=PM.urls.map((u,i)=>`<div class="item"><div class="b"><b>${esc(u.host)}</b>
+    <small style="user-select:all">${esc(u.browser)}</small><small style="user-select:all">${esc(u.wall)}</small>
+    <div class="bar" style="margin-top:6px"><button onclick="navigator.clipboard.writeText('${esc(u.browser)}')">Copy browser link</button><button onclick="navigator.clipboard.writeText('${esc(u.wall)}')">Copy wall-display link</button></div></div>
+    <div style="text-align:center"><img src="/api/parent/qr?i=${i}&kind=wall" width="120" height="120" alt="QR"><small>wall display</small></div>
+    <div style="text-align:center"><img src="/api/parent/qr?i=${i}&kind=browser" width="120" height="120" alt="QR"><small>browser</small></div></div>`).join("");
+  el.innerHTML=`<h2>Parent mode</h2><div class="item"><div class="b"><p>A <b>read-only</b> page on your home network for a wall display (such as a Shelly Wall Display) or any browser. Devices only receive a secret link - never your WebUntis login. It shows what this Mac last synced, so keep the app or the daily sync running. <b>Teams chats, messages and contacts are never included.</b></p>
+   <div class="bar"><span>Status: <b style="color:${PM.running?"var(--ok)":"var(--mut)"}">${PM.running?"running":"off"}</b> · port ${PM.port}</span>
+   ${PM.installed?`<button onclick="parentAct('remove')">Turn off</button>`:`<button class="on" onclick="parentAct('install')">Turn on (starts at login)</button>`}
+   <button onclick="if(confirm('Create a new link? Every device using the old link stops working.'))parentAct('rotate')">New link</button></div>
+   ${PM.running||PM.installed?(links||`<p class="mut">No network address found - connect this Mac to Wi-Fi.</p>`):`<p class="mut">Turn it on to get the link and QR codes.</p>`}
+   <p><b>Show on the Parent page</b> <small style="display:inline" class="mut">(the study plan is edited in the "Study plan" tab)</small></p>
+   <div class="bar">${PM.all_sections.map(k=>`<label><input type="checkbox" data-sec="${k}" ${PM.sections.includes(k)?"checked":""} onchange="parentSections()"> ${SECN[k]}</label>`).join(" ")}</div>
+   <p class="mut" style="font-size:12px">The link is a secret: anyone on your Wi-Fi who has it can view the Parent page, and the connection is not encrypted (plain http). Only devices on your home network can reach it. macOS may ask once to allow incoming connections - choose Allow.</p></div></div>`}
+async function parentAct(a){const r=await post("/api/parent/"+a);if(!r.ok){const j=await r.json().catch(()=>({}));alert(j.error||"failed")}await loadParent()}
+async function parentSections(){const sections=[...document.querySelectorAll("[data-sec]")].filter(c=>c.checked).map(c=>c.dataset.sec);
+  const r=await post("/api/parent/sections",{sections});if(!r.ok)alert("Pick at least one section");await loadParent()}
+async function setupView(){
+  if(!BR.length)BR=await (await fetch("/api/browsers")).json();
+  $("#tabs").innerHTML="";
+  $("#main").innerHTML=`<h2>Welcome to Stundl Student Client</h2><div class="item"><div class="b">
+   <p><b>1. Find your school</b></p><div class="bar"><input type="search" id="sq" size="32" placeholder="School name or city" oninput="schoolSearch(this.value)"></div><div id="sres"></div>
+   <p><b>2. Browser for the login</b> ${brSelect("br",CFG.browser||"auto")}</p>
+   <p class="mut">A browser window opens - sign in there with login.tirol.gv.at. SSC never sees your password.</p><p id="lst"></p></div></div>`;
+  if(CFG.login&&CFG.login.running)watchLogin();
+}
+let stmr;function schoolSearch(v){clearTimeout(stmr);stmr=setTimeout(async()=>{
+  if(v.trim().length<3){$("#sres").innerHTML="";return}
+  try{const r=await (await fetch("/api/schools?q="+encodeURIComponent(v))).json();
+    $("#sres").innerHTML=Array.isArray(r)?(r.map(x=>`<div class="item"><div class="b"><b>${esc(x.name)}</b><small>${esc(x.address)}</small></div><button onclick="startLogin('${esc(x.server)}','${esc(x.school)}')">Log in</button></div>`).join("")||`<p class="mut">No schools found.</p>`):`<p class="mut">Search failed: ${esc(r.error||"")}</p>`}
+  catch(e){$("#sres").innerHTML=`<p class="mut">Search needs an internet connection.</p>`}},350)}
+async function startLogin(server,school){const r=await post("/api/login",{server,school,browser:$("#br").value});
+  if(!r.ok)return alert("Invalid school or browser.");watchLogin()}
+function watchLogin(){const t=setInterval(async()=>{CFG=await (await fetch("/api/config")).json();const l=CFG.login;
+  if(l.running){$("#lst").textContent="Waiting for you to log in in the browser window… (the first run may download a browser)";return}
+  clearInterval(t);if(l.ok){await doSync();await load()}else $("#lst").textContent="Login failed: "+lastErr(l.log)},1500);
+  $("#lst").textContent="Waiting for you to log in in the browser window…"}
+async function load(){
+  if(SNAP){S=SNAP;$("#sync").style.display=$("#exp").style.display="none";banner("Offline copy from "+when()+" (read-only).");return render()}
+  try{S=await (await fetch("/api/state")).json();CFG=await (await fetch("/api/config")).json();if(!BR.length)BR=await (await fetch("/api/browsers")).json()}
+  catch(e){return banner("Can't reach the local server.")}
+  if(!CFG.configured)return setupView();
+  render()}
+load().then(()=>{if(!SNAP&&CFG.configured)fetch("/api/sync").then(r=>r.json()).then(r=>{r.running?doSync(true):r.ok===false&&failed(r)})});
+</script></body></html>

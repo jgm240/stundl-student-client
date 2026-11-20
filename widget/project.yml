@@ -1,0 +1,30 @@
+name: SSCWidget
+options:
+  bundleIdPrefix: com.stundl
+  deploymentTarget:
+    macOS: "14.0"
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    DEVELOPMENT_TEAM: ""   # set your Team ID (free Personal Team works) before running on your Mac
+targets:
+  SSCWidgetHost:
+    type: application
+    platform: macOS
+    sources: [App]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.stundl.ssc.host
+        GENERATE_INFOPLIST_FILE: YES
+    dependencies:
+      - target: SSCWidget
+  SSCWidget:
+    type: app-extension
+    platform: macOS
+    sources: [Widget]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.stundl.ssc.host.widget
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_NSExtension_NSExtensionPointIdentifier: com.apple.widgetkit-extension
+        INFOPLIST_KEY_CFBundleDisplayName: SSC

@@ -1,0 +1,16 @@
+# Builds the unsigned SSC-SAFE iOS IPA on GitHub's macOS servers (they have Xcode), so no Xcode is needed locally.
+# Run it from the Actions tab ("Run workflow") and download SSC-SAFE-unsigned.ipa from the run's artifacts.
+name: Build unsigned SSC-SAFE IPA
+on:
+  workflow_dispatch:   # run it by hand from the Actions tab
+jobs:
+  ipa:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: brew install xcodegen
+      - run: ./ios/build_ipa.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SSC-SAFE-unsigned-ipa
+          path: ios/SSC-SAFE-unsigned.ipa
