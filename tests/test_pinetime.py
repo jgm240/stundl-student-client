@@ -39,5 +39,39 @@ class PineTimeTests(unittest.TestCase):
         self.assertIn("No watch set up", pinetime.sync())
 
 
+    def test_event_wire_format_matches_firmware(self):
+        b = pinetime.event_bytes(2, 5, 1_800_000_000, 1_800_003_600, "Math R1")
+        self.assertEqual(b[0:2], bytes([2, 5]))
+        self.assertEqual(int.from_bytes(b[2:10], "little"), 1_800_000_000)
+        self.assertEqual(int.from_bytes(b[10:18], "little"), 1_800_003_600)
+        self.assertEqual((b[18], b[19:]), (7, b"Math R1"))
+        self.assertEqual(len(b[:19]), 19)
+        long = pinetime.event_bytes(0, 1, 0, 0, "Ä" * 60)                 # never splits a character, max 40 bytes
+        self.assertLessEqual(long[18], 40)
+        long[19:].decode("utf-8")
+
+    def test_school_events_mix_and_prefixes(self):
+        now = datetime(2026, 11, 23, 7, 0)
+        les = lambda d, h, sub, room="R1", c=False: dict(start=f"{d}T{h}:00", end=f"{d}T{h[:2]}:45", subject=sub, room=room, cancelled=c)
+        st = dict(timetable={"w": [les("2026-11-23", "08:00", "Math"), les("2026-11-23", "09:00", "Art", c=True), les("2026-11-23", "10:00", "Bio"),
+                                   les("2026-11-24", "08:00", "Eng"), les("2026-11-24", "09:00", "Chem")]},
+                  exams=[dict(date="2026-11-26", subject="Physics", text="")],
+                  homework=[dict(id=1, due="2026-11-24", subject="Math", text="p.12", status="soon", done=False)],
+                  homework_cfg=dict(dismiss_done=True), homework_summary={})
+        import core as c
+        orig = c.hw_active
+        c.hw_active = lambda s: s["homework"]
+        try:
+            ev = pinetime.school_events(st, now)
+        finally:
+            c.hw_active = orig
+        titles = [t for _, _, t in ev]
+        self.assertEqual(len(ev), 5)
+        self.assertIn("Exam: Physics", titles)
+        self.assertIn("HW: Math p.12", titles)
+        self.assertNotIn("Art R1", titles)                                # cancelled lessons are not shown
+        self.assertEqual([e[0] for e in ev], sorted(e[0] for e in ev))     # soonest first
+
+
 if __name__ == "__main__":
     unittest.main()

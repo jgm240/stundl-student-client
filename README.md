@@ -36,6 +36,9 @@ binary sensors and a calendar. Setup guide: `homeassistant/README.md`.
 ## SSC Server (ISO)
 A Debian-based, installable server image (64-bit and 32-bit) with guest/user/admin accounts, an admin panel and the `ssconfig` tool (`ssconfig showip`, `ssconfig showlink`, custom IP, required long links, SSH settings). See `server/README.md`.
 
+## PineTime / JWatch watch
+`ssc pinetime scan|pair|sync` sets the watch clock and sends notifications over Bluetooth. On the JWatch firmware it also fills the **School** screen (next lessons, exams `Exam:`, homework `HW:`). Not tested on a real watch. Needs `pip install bleak`.
+
 ## Security
 No password is ever stored. The WebUntis session and the Parent link secret are kept in the macOS Keychain, not in
 files; the data folder is private to your account; the local app server only answers the window the app opened; browser

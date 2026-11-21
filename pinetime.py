@@ -5,6 +5,8 @@ homework that is missed or due soon - as watch notifications (Alert Notification
 watch, no pairing key or credential is involved: the only thing stored is the watch's Bluetooth address.
 
 InfiniTime has no timetable app, so notifications are the way to get data onto it. Needs `pip install bleak`.
+On the JWatch firmware it also fills the "School" screen (next lessons, exams, homework) through the firmware's own
+CalendarEventService; stock InfiniTime lacks that service, so there only clock + notifications are sent.
 The protocol parts are pure functions (tested); the Bluetooth part has not been run against a real watch in this repo's CI.
 """
 import asyncio
@@ -16,6 +18,9 @@ import core
 
 CTS_CHAR = "00002a2b-0000-1000-8000-00805f9b34fb"      # Current Time
 ANS_NEW_ALERT = "00002a46-0000-1000-8000-00805f9b34fb"  # New Alert
+SCHOOL_CHAR = "9214f6b2-01ea-4c6b-8f1e-6a3a3e5f6c10"   # JWatch firmware: CalendarEventService event characteristic (School screen)
+SCHOOL_MAX_EVENTS = 5                                  # CalendarEventService::MaxEvents
+SCHOOL_TITLE_MAX = 40                                  # CalendarEventService::TitleMaxLength
 NAME_PREFIXES = ("InfiniTime", "Pinetime", "PineTime", "JWatch")
 MAX_TEXT = 100
 CAT_SIMPLE, CAT_EMAIL = 0x00, 0x01
@@ -33,6 +38,43 @@ def alert_bytes(title, message=""):
         return " ".join(str(s).split())[:n]
     text = f"{clean(title, 40)}\0{clean(message, MAX_TEXT)}".encode("utf-8")[:MAX_TEXT + 42]
     return bytes([CAT_SIMPLE, 1]) + text
+
+
+def _clip(text, n=SCHOOL_TITLE_MAX):
+    """Cut to n UTF-8 bytes without splitting a character."""
+    return " ".join(str(text).split()).encode("utf-8")[:n].decode("utf-8", "ignore")
+
+
+def event_bytes(index, total, start, end, title):
+    """JWatch School event write: [index, total, start u64 LE, end u64 LE, titleLen, title...] (header 19 bytes)."""
+    t = _clip(title).encode("utf-8")
+    return bytes([index, total]) + int(start).to_bytes(8, "little") + int(end).to_bytes(8, "little") + bytes([len(t)]) + t
+
+
+def school_events(st, now=None):
+    """The (at most 5) items the School screen shows, soonest first: [(start_epoch, end_epoch, title)].
+    Titles carry their kind as a prefix because the firmware colours by it: 'Exam:' orange, 'HW:' blue, lessons white.
+    Mix: up to 2 exams and 2 homework items (they matter most), the rest next lessons."""
+    now = now or datetime.now()
+    nowi = now.strftime("%Y-%m-%dT%H:%M")
+
+    def epoch(iso):
+        return int(datetime.fromisoformat(iso).timestamp())     # naive = local time
+
+    lessons = sorted((e for w in st["timetable"].values() for e in w if e["start"] >= nowi and not e["cancelled"]), key=lambda e: e["start"])
+    exams = sorted((x for x in st["exams"] if x["date"] >= nowi[:10]), key=lambda x: x["date"])
+    hws = sorted((h for h in core.hw_active(st) if h["status"] != "done"), key=lambda h: h["due"])
+    pick = []
+    for x in exams[:2]:
+        t = (x.get("time") or x.get("start") or "08:00")[:5]
+        s0 = f"{x['date']}T{t if len(t) == 5 and t[2] == ':' else '08:00'}"
+        pick.append((epoch(s0), epoch(s0) + 3600, f"Exam: {x['subject'] or x.get('text', '')}"))
+    for h in hws[:2]:
+        s0 = f"{h['due']}T08:00"
+        pick.append((epoch(s0), epoch(s0) + 3600, f"HW: {h['subject']} {h['text']}".strip()))
+    for e in lessons[: SCHOOL_MAX_EVENTS - len(pick)]:
+        pick.append((epoch(e["start"]), epoch(e["end"]), f"{e['subject'] or 'Lesson'} {e['room']}".strip()))
+    return sorted(pick)[:SCHOOL_MAX_EVENTS]
 
 
 def notifications(model=None):
@@ -101,11 +143,16 @@ async def scan(seconds=8):
     return [(d.address, d.name) for d in found if d.name and d.name.startswith(NAME_PREFIXES)]
 
 
-async def push(addr, items, set_clock=True, timeout=20):
+async def push(addr, items, set_clock=True, timeout=20, events=None):
     bleak = _bleak()
     async with bleak.BleakClient(addr, timeout=timeout) as c:
         if set_clock:
             await c.write_gatt_char(CTS_CHAR, current_time_bytes(datetime.now()), response=True)
+        if events is not None and c.services.get_characteristic(SCHOOL_CHAR):   # only the JWatch firmware has the School screen
+            for i, (a, b, t) in enumerate(events):
+                await c.write_gatt_char(SCHOOL_CHAR, event_bytes(i, len(events), a, b, t), response=True)
+            if not events:   # nothing coming up: index 0 with total 0 empties the list
+                await c.write_gatt_char(SCHOOL_CHAR, event_bytes(0, 0, 0, 0, ""), response=True)
         for _, title, msg in items:
             await c.write_gatt_char(ANS_NEW_ALERT, alert_bytes(title, msg), response=True)
             await asyncio.sleep(0.4)
@@ -120,9 +167,10 @@ def sync(test=False):
     items = [("test", "SSC", "Test notification")] if test else notifications()
     todo, today = (items, None) if test else unsent(items, state)
     try:
-        asyncio.run(push(addr, todo))
+        events = None if test else school_events(core.state())
+        asyncio.run(push(addr, todo, events=events))
     except Exception as e:  # BLE errors vary by platform; the watch may simply be out of range
         return f"Watch not reachable ({type(e).__name__}: {e})"
     if not test:
         save_state(state, [k for k, _, _ in todo], today)
-    return f"Watch updated: clock set, {len(todo)} notification(s) sent."
+    return f"Watch updated: clock set, {len(todo)} notification(s), {0 if events is None else len(events)} School entr{'y' if events is not None and len(events) == 1 else 'ies'}."
