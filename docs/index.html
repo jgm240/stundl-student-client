@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Stundl Student Client (SSC) – your school day, offline</title>
+<meta name="description" content="Unofficial, open-source client that keeps your own WebUntis timetable, homework and exams on your Mac, Windows PC, Linux machine, iPhone, wall display or Home Assistant.">
+<meta property="og:title" content="Stundl Student Client (SSC)">
+<meta property="og:description" content="Your school day, offline. Timetable, homework, exams and a read-only wall display – open source, unofficial.">
+<meta property="og:image" content="assets/social.png">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" type="image/png" href="assets/favicon.png">
+<link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
+<style>
+:root{
+  --bg:#f6f8fc;--card:#ffffff;--fg:#10131a;--mut:#5b6474;--line:#e3e8f1;
+  --teal:#0ea5a4;--indigo:#3b3fd8;--amber:#ffc83d;--ok:#16a34a;--warn:#d97706;
+  --grad:linear-gradient(135deg,#0ea5a4 0%,#3b3fd8 100%);
+  --shadow:0 10px 30px rgba(24,32,80,.10);--radius:20px;
+}
+@media(prefers-color-scheme:dark){:root{
+  --bg:#0b0f17;--card:#121826;--fg:#eef2fa;--mut:#9aa6bb;--line:#222b3d;--shadow:0 10px 30px rgba(0,0,0,.45);
+}}
+*{box-sizing:border-box}html{scroll-behavior:smooth}
+@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}*{animation:none!important;transition:none!important}}
+body{margin:0;font:17px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Inter,system-ui,sans-serif;color:var(--fg);background:var(--bg)}
+a{color:var(--indigo);text-decoration:none}a:hover{text-decoration:underline}
+@media(prefers-color-scheme:dark){a{color:#8fb4ff}}
+.wrap{max-width:1120px;margin:0 auto;padding:0 20px}
+h1,h2,h3{line-height:1.15;margin:0}
+h2{font-size:clamp(28px,4vw,40px);letter-spacing:-.02em}
+.sub{color:var(--mut);max-width:62ch}
+section{padding:72px 0}
+/* nav */
+nav{position:sticky;top:0;z-index:20;backdrop-filter:blur(14px);background:color-mix(in srgb,var(--bg) 82%,transparent);border-bottom:1px solid var(--line)}
+nav .wrap{display:flex;align-items:center;gap:22px;height:64px}
+.brand{display:flex;align-items:center;gap:10px;font-weight:700;color:var(--fg)}
+.brand img{width:32px;height:32px;border-radius:8px}
+nav .links{display:flex;gap:20px;margin-left:auto;align-items:center}
+nav .links a{color:var(--mut);font-size:15px}
+.btn{display:inline-flex;align-items:center;gap:8px;padding:12px 22px;border-radius:999px;font-weight:600;font-size:16px;border:1px solid var(--line);background:var(--card);color:var(--fg);cursor:pointer}
+.btn:hover{text-decoration:none;transform:translateY(-1px)}
+.btn.primary{background:var(--grad);color:#fff;border:0;box-shadow:0 8px 22px rgba(59,63,216,.35)}
+.btn.small{padding:8px 16px;font-size:14px}
+@media(max-width:760px){nav .links a:not(.btn){display:none}}
+/* hero */
+.hero{padding:56px 0 40px;background:radial-gradient(900px 420px at 85% -10%,rgba(59,63,216,.18),transparent),radial-gradient(700px 380px at -5% 10%,rgba(14,165,164,.20),transparent)}
+.hero .grid{display:grid;grid-template-columns:1.05fr 1fr;gap:44px;align-items:center}
+@media(max-width:900px){.hero .grid{grid-template-columns:1fr}}
+.pill{display:inline-block;padding:5px 14px;border-radius:999px;background:color-mix(in srgb,var(--teal) 14%,transparent);color:var(--teal);font-weight:600;font-size:14px;margin-bottom:18px}
+.hero h1{font-size:clamp(40px,6.4vw,68px);letter-spacing:-.03em}
+.hero h1 em{font-style:normal;background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}
+.hero p{font-size:20px;color:var(--mut);margin:20px 0 28px;max-width:52ch}
+.cta{display:flex;gap:12px;flex-wrap:wrap}
+.fine{font-size:14px;color:var(--mut);margin-top:18px}
+.device{border-radius:22px;border:1px solid var(--line);background:#06080d;padding:10px;box-shadow:var(--shadow),0 0 0 1px rgba(255,255,255,.03) inset}
+.device iframe{display:block;width:100%;aspect-ratio:16/10;border:0;border-radius:14px;background:#0b0e14}
+.cap{font-size:13px;color:var(--mut);text-align:center;margin-top:10px}
+/* cards */
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:18px;margin-top:36px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:24px;box-shadow:var(--shadow)}
+.card h3{font-size:19px;margin:12px 0 6px}
+.card p{margin:0;color:var(--mut);font-size:15.5px}
+.ico{width:44px;height:44px;border-radius:12px;background:var(--grad);display:grid;place-items:center;color:#fff;font-size:22px}
+.badge{display:inline-block;font-size:12px;font-weight:700;padding:2px 10px;border-radius:99px;margin-right:4px;color:#fff}
+.b-red{background:#dc2626}.b-or{background:var(--warn)}.b-bl{background:var(--indigo)}.b-gr{background:var(--ok)}
+/* demo */
+.demo{background:linear-gradient(180deg,transparent,color-mix(in srgb,var(--indigo) 7%,transparent))}
+.tabs{display:flex;gap:8px;margin:26px 0 16px;flex-wrap:wrap}
+.tab{padding:9px 18px;border-radius:999px;border:1px solid var(--line);background:var(--card);color:var(--fg);font:inherit;font-size:15px;cursor:pointer}
+.tab[aria-selected=true]{background:var(--grad);color:#fff;border-color:transparent}
+.demo .device iframe.tall{aspect-ratio:auto;height:620px}
+/* platforms */
+.plat{display:flex;flex-direction:column;gap:10px}
+.plat .top{display:flex;align-items:center;gap:12px}
+.plat .os{font-size:30px}
+.plat ul{margin:6px 0 10px;padding-left:18px;color:var(--mut);font-size:15px}
+.plat .actions{margin-top:auto;display:flex;gap:8px;flex-wrap:wrap}
+.tag{font-size:12px;border:1px solid var(--line);border-radius:99px;padding:1px 9px;color:var(--mut)}
+/* security */
+.sec{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:18px;margin-top:32px}
+.note{margin-top:26px;padding:18px 22px;border-radius:16px;background:color-mix(in srgb,var(--amber) 16%,transparent);border:1px solid color-mix(in srgb,var(--amber) 45%,transparent);font-size:15.5px}
+details{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px 20px;margin-top:12px}
+summary{cursor:pointer;font-weight:600}
+details p{color:var(--mut);margin:10px 0 2px;font-size:16px}
+footer{border-top:1px solid var(--line);padding:36px 0 60px;color:var(--mut);font-size:14.5px}
+footer .wrap{display:flex;gap:24px;flex-wrap:wrap;justify-content:space-between}
+code{background:color-mix(in srgb,var(--indigo) 10%,transparent);padding:1px 7px;border-radius:6px;font-size:.92em}
+</style>
+</head>
+<body>
+
+<nav aria-label="Main">
+  <div class="wrap">
+    <a class="brand" href="#top"><img src="assets/icon-512.png" alt="" width="32" height="32"> Stundl Student Client</a>
+    <div class="links">
+      <a href="#features">Features</a><a href="#demo">Live demo</a><a href="#download">Download</a><a href="#security">Security</a>
+      <a class="btn small primary" href="https://github.com/jgm240/stundl-student-client/releases">Get SSC</a>
+    </div>
+  </div>
+</nav>
+
+<header class="hero" id="top">
+  <div class="wrap grid">
+    <div>
+      <span class="pill">Open source · MIT · unofficial</span>
+      <h1>Your school day, <em>offline</em>.</h1>
+      <p>Stundl Student Client (SSC) keeps your own WebUntis timetable, homework and exams on your Mac, Windows PC, Linux machine, iPhone, a wall display – or in Home Assistant. Homework tidies itself, and nobody needs your login.</p>
+      <div class="cta">
+        <a class="btn primary" href="https://github.com/jgm240/stundl-student-client/releases">⬇︎ Download</a>
+        <a class="btn" href="#demo">▶︎ Try the live demo</a>
+      </div>
+      <p class="fine">Also called <strong>SSC Student Client</strong>. Not affiliated with Untis GmbH or Microsoft.</p>
+    </div>
+    <div>
+      <div class="device"><iframe src="demo/wall.html" title="Wall display demo with sample data" loading="eager"></iframe></div>
+      <div class="cap">The Parent-mode wall display – live demo, sample data</div>
+    </div>
+  </div>
+</header>
+
+<main>
+<section id="features">
+  <div class="wrap">
+    <h2>Everything for the school day</h2>
+    <p class="sub">One small app that downloads <em>your own</em> WebUntis data, so it's there when the Wi-Fi isn't – and shows it wherever you want.</p>
+    <div class="cards">
+      <article class="card"><div class="ico">📴</div><h3>Works offline</h3><p>Timetable, homework, exams, grades and absences live on your device. Sync when you're online; read them anywhere.</p></article>
+      <article class="card"><div class="ico">✅</div><h3>Homework that tidies itself</h3>
+        <p><span class="badge b-red">missed</span><span class="badge b-or">due soon</span><span class="badge b-bl">pending</span><span class="badge b-gr">done</span><br>Clear statuses, and finished or long-missed items dismiss themselves automatically.</p></article>
+      <article class="card"><div class="ico">🗓️</div><h3>Your own study plan</h3><p>Plan what to learn and when. You edit it on the computer; it shows on the wall display and in Home Assistant.</p></article>
+      <article class="card"><div class="ico">🖥️</div><h3>Parent mode</h3><p>A read-only page for a wall display, tablet or any browser – opened with a secret link and QR code, never with your credentials.</p></article>
+      <article class="card"><div class="ico">🔔</div><h3>Menu bar &amp; tray</h3><p>Next lesson and a homework badge at a glance; mark things done from the menu. Reminders and change alerts included.</p></article>
+      <article class="card"><div class="ico">🏠</div><h3>Home Assistant</h3><p>Sensors and a timetable calendar. Autonomous mode logs in by itself – no computer needed.</p></article>
+    </div>
+  </div>
+</section>
+
+<section class="demo" id="demo">
+  <div class="wrap">
+    <h2>Try it right here</h2>
+    <p class="sub">These are the real Parent-mode pages, running with <strong>sample data</strong> (a made-up class, shifted to a weekday so there's always a lesson "now").</p>
+    <div class="tabs" role="tablist">
+      <button class="tab" role="tab" aria-selected="true" data-src="demo/wall.html" data-tall="0">Wall display</button>
+      <button class="tab" role="tab" aria-selected="false" data-src="demo/overview.html" data-tall="1">Browser overview</button>
+    </div>
+    <div class="device"><iframe id="demoFrame" src="demo/wall.html" title="Interactive demo with sample data"></iframe></div>
+    <div class="cap">Sample data · in the overview, switch tabs (Timetable, Homework, Study plan …)</div>
+  </div>
+</section>
+
+<section id="download">
+  <div class="wrap">
+    <h2>Get it on your devices</h2>
+    <p class="sub">Free and open source. Downloads are unsigned (no paid developer certificates), so your system will ask for confirmation once. Full steps: <a href="https://github.com/jgm240/stundl-student-client/blob/main/INSTALL.md">INSTALL.md</a>.</p>
+    <div class="cards">
+      <article class="card plat"><div class="top"><span class="os">🪟</span><h3>Windows</h3></div>
+        <ul><li>App, tray icon, background sync</li><li>Secrets in Credential Manager</li></ul>
+        <div class="actions"><a class="btn small primary" href="https://github.com/jgm240/stundl-student-client/releases">Download .zip</a></div></article>
+      <article class="card plat"><div class="top"><span class="os">🐧</span><h3>Linux</h3></div>
+        <ul><li>GUI <strong>and</strong> terminal view (<code>ssc tui</code>)</li><li>systemd timers, Secret Service keyring</li></ul>
+        <div class="actions"><a class="btn small primary" href="https://github.com/jgm240/stundl-student-client/releases">Download .tar.gz</a></div></article>
+      <article class="card plat"><div class="top"><span class="os">🍎</span><h3>macOS</h3></div>
+        <ul><li>App, menu bar widget, widget (WidgetKit)</li><li>Build &amp; sign it yourself: <code>./build_app.sh</code></li></ul>
+        <div class="actions"><a class="btn small" href="https://github.com/jgm240/stundl-student-client#build">Build steps</a></div></article>
+      <article class="card plat"><div class="top"><span class="os">📱</span><h3>SSC Mobile <span class="tag">iPhone · autonomous</span></h3></div>
+        <ul><li>Logs in to WebUntis by itself</li><li>Key stays in the Keychain, behind Face ID</li></ul>
+        <div class="actions"><a class="btn small primary" href="https://github.com/jgm240/stundl-student-client/releases">Download .ipa</a></div></article>
+      <article class="card plat"><div class="top"><span class="os">🛡️</span><h3>SSC-SAFE <span class="tag">iPhone · Parent client</span></h3></div>
+        <ul><li>Only shows the read-only Parent page</li><li>Caches its data, sends no credentials</li></ul>
+        <div class="actions"><a class="btn small primary" href="https://github.com/jgm240/stundl-student-client/releases">Download .ipa</a></div></article>
+      <article class="card plat"><div class="top"><span class="os">🏠</span><h3>Home Assistant</h3></div>
+        <ul><li>Add via HACS (custom repository)</li><li>Autonomous or Parent-link mode</li></ul>
+        <div class="actions"><a class="btn small" href="https://github.com/jgm240/stundl-student-client/blob/main/homeassistant/README.md">Setup guide</a></div></article>
+    </div>
+    <p class="fine">iPhone apps are unsigned IPAs: sign them with your own Apple ID using Sideloadly or AltStore.</p>
+  </div>
+</section>
+
+<section id="security">
+  <div class="wrap">
+    <h2>Built so your login stays yours</h2>
+    <p class="sub">SSC never asks for or stores a password. You sign in in a normal browser window, and what SSC keeps is guarded by your system.</p>
+    <div class="sec">
+      <article class="card"><div class="ico">🔐</div><h3>Secrets in the OS vault</h3><p>Session data and the Parent link live in the macOS Keychain, Windows Credential Manager or Linux Secret Service – never in plain files. Browser sign-in sessions are deleted after every sync.</p></article>
+      <article class="card"><div class="ico">👀</div><h3>Read-only Parent mode</h3><p>The wall-display page can't change anything and answers only your home network. It never contains messages or sign-in data, and you can rotate its link any time.</p></article>
+      <article class="card"><div class="ico">📲</div><h3>Key that stays on the phone</h3><p>SSC Mobile keeps its Untis Mobile key on this device only – not in iCloud, not in backups – behind Face ID or your passcode, with no way to show or export it.</p></article>
+    </div>
+    <div class="note"><strong>Honest limits.</strong> An app that logs in has to hold its key in memory for a moment, so nothing can be "impossible to extract" on a compromised device. SSC uses WebUntis's internal, undocumented endpoints; your school can change or block them, and the Untis Mobile login only works if your school allows it.</div>
+  </div>
+</section>
+
+<section id="faq">
+  <div class="wrap">
+    <h2>Questions</h2>
+    <details><summary>Is this official?</summary><p>No. SSC is an independent open-source project, not affiliated with or endorsed by Untis GmbH (WebUntis), Microsoft or Apple. It reads only your own account.</p></details>
+    <details><summary>Why “Stundl”?</summary><p>From the Austrian-German <em>Stunde</em> (lesson) with a friendly diminutive ending. English speakers can say <em>SSC Student Client</em>.</p></details>
+    <details><summary>Will it work with my school?</summary><p>If you can sign in to WebUntis in a browser, the desktop apps can sync. SSC Mobile and the autonomous Home Assistant mode additionally need your school to have Untis Mobile switched on.</p></details>
+    <details><summary>What does it cost?</summary><p>Nothing. It's MIT-licensed – see the <a href="https://github.com/jgm240/stundl-student-client/blob/main/LICENSE">license</a>.</p></details>
+  </div>
+</section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <div><strong>Stundl Student Client (SSC)</strong><br>Unofficial, open source (MIT). Not affiliated with Untis GmbH, Microsoft or Apple.</div>
+    <div><a href="https://github.com/jgm240/stundl-student-client">GitHub</a> · <a href="https://github.com/jgm240/stundl-student-client/releases">Releases</a> · <a href="https://github.com/jgm240/stundl-student-client/blob/main/INSTALL.md">Install guide</a> · <a href="https://github.com/jgm240/stundl-student-client/issues">Report a problem</a></div>
+  </div>
+</footer>
+
+<script>
+const frame=document.getElementById("demoFrame");
+document.querySelectorAll(".tab").forEach(t=>t.addEventListener("click",()=>{
+  document.querySelectorAll(".tab").forEach(x=>x.setAttribute("aria-selected","false"));
+  t.setAttribute("aria-selected","true");frame.src=t.dataset.src;frame.classList.toggle("tall",t.dataset.tall==="1");
+}));
+</script>
+</body>
+</html>

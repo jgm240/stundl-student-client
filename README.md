@@ -1,5 +1,7 @@
 # Stundl Student Client (SSC)
 
+**Website & live demo: https://jgm240.github.io/stundl-student-client/** · **Downloads: [Releases](https://github.com/jgm240/stundl-student-client/releases)**
+
 English speakers can call it **SSC Student Client** (the word Stundl is hard to pronunce in English)
 
 An unofficial, independent macOS app that downloads your own WebUntis data (timetable, homework, exams, grades,

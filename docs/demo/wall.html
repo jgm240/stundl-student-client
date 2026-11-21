@@ -1,0 +1,132 @@
+<!doctype html><html lang="en"><head>
+<script>
+/* DEMO: sample data only. Weekends show a weekday at 10:15 so the demo always has lessons "now". */
+(function(){const R=Date,n=new R();let off=0;const wd=n.getDay();if(wd===6)off=2*864e5;else if(wd===0)off=864e5;
+ const t=new R(n.getTime()+off);t.setHours(10,15,0,0);off=t.getTime()-n.getTime();
+ class D extends R{constructor(...a){a.length?super(...a):super(R.now()+off)}static now(){return R.now()+off}}window.Date=D;})();
+window.SSC_NATIVE=true;window.SSC_WALL=true;
+</script>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow">
+<title>SSC demo (sample data)</title>
+<style>
+:root{--bg:#f4f6fb;--card:#fff;--fg:#14161a;--mut:#6b7280;--acc:#2563eb;--bad:#dc2626;--ok:#16a34a;--warn:#d97706;--line:#e5e7eb}
+@media(prefers-color-scheme:dark){:root{--bg:#0e1117;--card:#181c25;--fg:#f2f4f8;--mut:#9aa3b2;--acc:#60a5fa;--bad:#f87171;--ok:#4ade80;--warn:#fbbf24;--line:#262c38}}
+body.wall{--bg:#0b0e14;--card:#151a23;--fg:#f4f6fa;--mut:#9aa3b2;--acc:#60a5fa;--bad:#f87171;--ok:#4ade80;--warn:#fbbf24;--line:#222836;cursor:none;overflow:hidden}
+*{box-sizing:border-box}html,body{margin:0;height:100%}
+body{font:16px -apple-system,system-ui,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--fg)}
+.mut{color:var(--mut)}.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:14px 16px}
+h1{font-size:18px;margin:0}h2{font-size:13px;margin:0 0 8px;color:var(--mut);text-transform:uppercase;letter-spacing:.05em}
+header{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:12px 14px;position:sticky;top:0;background:var(--bg);z-index:2}
+button{border:1px solid var(--line);background:var(--card);color:var(--fg);padding:7px 13px;border-radius:999px;font:inherit;cursor:pointer}
+button.on{background:var(--acc);border-color:var(--acc);color:#fff}
+main{padding:0 14px 28px;max-width:1100px;margin:auto}
+.row{display:flex;gap:10px;align-items:baseline;padding:7px 0;border-bottom:1px solid var(--line)}.row:last-child{border:0}
+.t{width:92px;flex:none;color:var(--mut);font-variant-numeric:tabular-nums}.s{font-weight:600}.x .s{text-decoration:line-through;color:var(--bad)}
+.badge{font-size:11px;padding:1px 8px;border-radius:99px;background:var(--acc);color:#fff;margin-right:6px}
+.badge.timetable{background:var(--bad)}.badge.homework{background:var(--warn)}.badge.grade{background:var(--ok)}
+.week{display:grid;grid-template-columns:repeat(5,1fr);gap:10px}@media(max-width:800px){.week{grid-template-columns:1fr}}
+.ent{border-left:4px solid var(--acc);padding:6px 9px;margin-bottom:7px;background:var(--card);border-radius:10px}.ent.x{border-color:var(--bad);opacity:.7}.ent.x b{text-decoration:line-through}
+.ent small{display:block;color:var(--mut)}table{width:100%;border-collapse:collapse}td,th{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line)}
+#err{color:var(--warn);font-size:13px;padding:0 14px}
+/* wall display */
+body.wall #app{height:100vh;padding:2.2vmin;display:grid;gap:2.2vmin;grid-template-columns:1.1fr 1fr;grid-template-rows:auto minmax(0,.75fr) minmax(0,1.25fr)}
+body.wall .card{padding:2vmin 2.4vmin;border-radius:2.4vmin;overflow:hidden;min-height:0}
+body.wall h2{font-size:2vmin}
+.wall-top{grid-column:1/3;display:flex;justify-content:space-between;align-items:center}
+.clock{font-size:9vmin;font-weight:700;line-height:1;font-variant-numeric:tabular-nums}.date{font-size:3vmin;color:var(--mut)}
+.now{font-size:5.2vmin;font-weight:700;line-height:1.1}.now small{display:block;font-size:2.6vmin;color:var(--mut);font-weight:400;margin-top:.6vmin}
+body.wall .row{font-size:2.5vmin;padding:.7vmin 0}body.wall .t{width:17vmin;font-size:2.4vmin}
+.wall-sm{font-size:2.5vmin}
+@media (max-aspect-ratio:1/1){body.wall #app{grid-template-columns:1fr;grid-template-rows:auto auto 1fr 1fr 1fr}.wall-top{grid-column:1}}
+</style></head><body><div id="app"></div><div id="err"></div>
+<script>
+const WALL=(typeof window.SSC_WALL==="boolean")?window.SSC_WALL:location.pathname.replace(/\/+$/,"").endsWith("/wall");
+document.body.classList.toggle("wall",WALL);
+const $=s=>document.querySelector(s),esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const pad=n=>String(n).padStart(2,"0"),iso=d=>`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+const mins=s=>+s.slice(11,13)*60+ +s.slice(14,16),hm=s=>s.slice(11,16);
+const dayName=s=>new Date(s+"T12:00").toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"short"});
+let D=null,tab="today",wk=null;
+const has=k=>D&&D.sections.includes(k),all=()=>Object.values(D.timetable||{}).flat().sort((a,b)=>a.start<b.start?-1:1);
+const TABS={today:"Today",timetable:"Timetable",homework:"Homework",exams:"Exams",plan:"Study plan",grades:"Grades",absences:"Absences",changes:"Changes"};
+let off=false,fetchedAt=0;
+const banner=()=>{$("#err").textContent=off?"Offline - showing the last data received"+(fetchedAt?" ("+new Date(fetchedAt).toLocaleString("en-GB")+")":"")+".":""};
+async function load(){
+  if(window.SSC_NATIVE)return;   // inside the SSC-SAFE app: the app fetches the data and keeps the offline cache
+  try{const r=await fetch("data.json",{cache:"no-store"});if(!r.ok)throw 0;D=await r.json();off=false;fetchedAt=Date.now();
+    try{localStorage.setItem("ssc-cache",JSON.stringify({t:fetchedAt,d:D}))}catch(e){}}
+  catch(e){if(!D){try{const c=JSON.parse(localStorage.getItem("ssc-cache")||"null");if(c){D=c.d;fetchedAt=c.t}}catch(_){}}off=true}
+  banner();render()}
+window.SSC_update=(data,offline,ts)=>{D=data;off=!!offline;fetchedAt=ts||0;banner();render()};
+const lessonRow=e=>`<div class="row ${e.cancelled?"x":""}"><span class="t">${hm(e.start)}–${hm(e.end)}</span><span class="s">${esc(e.subject||"Lesson")}</span><span class="mut">${esc(e.room)} ${esc(e.teacher)}</span>${e.cancelled?`<span style="color:var(--bad)">cancelled</span>`:""}${e.info?`<span class="mut">${esc(e.info)}</span>`:""}</div>`;
+const HO={missed:0,soon:1,pending:2},hwRows=(n)=>(D.homework||[]).filter(h=>h.status!=="done").sort((a,b)=>(HO[a.status]??3)-(HO[b.status]??3)||(a.due<b.due?-1:1)).slice(0,n);
+const hwRow=h=>`<div class="row"><span class="t" style="${h.status==='missed'?'color:var(--bad)':h.status==='soon'?'color:var(--warn)':''}">${esc(h.due.slice(5))}</span><span><span class="s">${esc(h.subject)}</span> ${esc(h.text)}</span></div>`;
+const exRows=n=>{const t=iso(new Date());return (D.exams||[]).filter(e=>e.date>=t).slice(0,n)};
+const exRow=e=>`<div class="row"><span class="t">${esc(e.date.slice(5))}</span><span><span class="s">${esc(e.subject)}</span> ${esc(e.text)}</span></div>`;
+const pmeta=p=>[p.subject,p.start,p.minutes?p.minutes+" min":""].filter(Boolean).join(" · ");
+const planRow=p=>`<div class="row"><span class="t">${esc(p.date.slice(5))}</span><span class="${p.done?"mut":""}">${p.done?"✓ ":""}<span class="s" ${p.done?'style="text-decoration:line-through"':""}>${esc(p.title)}</span> <span class="mut">${esc(pmeta(p))}</span>${p.notes?`<div class="mut">${esc(p.notes)}</div>`:""}</span></div>`;
+const planFrom=(n)=>{const t=iso(new Date());return (D.plan||[]).filter(p=>p.date>=t&&!(p.done&&p.date>t)).slice(0,n)};
+const chRow=c=>`<div class="row"><span><span class="badge ${esc(c.kind)}">${esc(c.kind)}</span>${esc(c.text)}</span></div>`;
+function wall(){
+  const now=new Date(),t=iso(now),nm=now.getHours()*60+now.getMinutes(),tm=iso(new Date(Date.now()+864e5));
+  const es=has("timetable")||has("today")?all().filter(e=>e.date===t):[],cur=es.find(e=>mins(e.start)<=nm&&nm<mins(e.end)&&!e.cancelled),nxt=es.find(e=>mins(e.start)>nm&&!e.cancelled);
+  const tmr=all().filter(e=>e.date===tm&&!e.cancelled),ch=(D.changes||[]).slice(0,4);
+  const big=cur?`<div class="mut" style="font-size:2.2vmin">NOW</div><div class="now">${esc(cur.subject)}<small>${hm(cur.start)}–${hm(cur.end)} · ${esc(cur.room)} ${esc(cur.teacher)}</small></div>`:
+    nxt?`<div class="mut" style="font-size:2.2vmin">NEXT</div><div class="now">${esc(nxt.subject)}<small>${hm(nxt.start)} · ${esc(nxt.room)} ${esc(nxt.teacher)}</small></div>`:
+    `<div class="now">${es.length?"School's out":"No lessons today"}<small>${tmr.length?"Tomorrow starts at "+hm(tmr[0].start):""}</small></div>`;
+  return `<div class="wall-top"><div><div class="clock" id="clock">${pad(now.getHours())}:${pad(now.getMinutes())}</div><div class="date">${now.toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long"})}</div></div><div class="card" style="min-width:34vmin">${big}</div></div>
+   <div class="card" style="grid-row:2/4"><h2>Today</h2>${es.map(lessonRow).join("")||`<div class="mut wall-sm">No lessons.</div>`}</div>
+   <div class="card"><h2>Homework due</h2>${hwRows(4).map(hwRow).join("")||`<div class="mut wall-sm">Nothing open 🎉</div>`}${exRows(2).length?`<h2 style="margin-top:1.4vmin">Exams</h2>`+exRows(2).map(exRow).join(""):""}</div>
+   <div class="card">${has("plan")?`<h2>Study plan</h2>${planFrom(3).map(planRow).join("")||`<div class="mut wall-sm">Nothing planned.</div>`}<h2 style="margin-top:1.4vmin">Changes</h2>${ch.slice(0,2).map(chRow).join("")||`<div class="mut wall-sm">No recent changes.</div>`}`:
+   `<h2>Changes</h2>${ch.map(chRow).join("")||`<div class="mut wall-sm">No recent changes.</div>`}`}</div>`}
+function today(){const t=iso(new Date()),tm=iso(new Date(Date.now()+864e5)),es=all();
+  const day=(d)=>`<div class="card" style="margin-bottom:10px"><h2>${dayName(d)}</h2>${es.filter(e=>e.date===d).map(lessonRow).join("")||`<div class="mut">No lessons.</div>`}</div>`;
+  return day(t)+day(tm)+`<div class="card" style="margin-bottom:10px"><h2>Homework due soon</h2>${hwRows(6).map(hwRow).join("")||`<div class="mut">Nothing open.</div>`}</div>`+
+   (has("plan")&&planFrom(1).length?`<div class="card" style="margin-bottom:10px"><h2>Study plan</h2>${planFrom(6).map(planRow).join("")}</div>`:"")+
+   ((D.changes||[]).length?`<div class="card"><h2>Latest changes</h2>${D.changes.slice(0,5).map(chRow).join("")}</div>`:"")}
+function timetable(){const ws=Object.keys(D.timetable||{}).sort();if(!ws.length)return `<p class="mut">No timetable data yet.</p>`;
+  if(!ws.includes(wk)){const t=iso(new Date());wk=[...ws].reverse().find(w=>w<=t)||ws[0]}
+  const days={};(D.timetable[wk]||[]).forEach(e=>(days[e.date]=days[e.date]||[]).push(e));
+  return `<p><button onclick="shift(-1)">←</button> <b>Week of ${wk}</b> <button onclick="shift(1)">→</button></p><div class="week">`+Object.keys(days).sort().map(d=>`<div><h2>${dayName(d)}</h2>${days[d].map(e=>`<div class="ent ${e.cancelled?"x":""}"><b>${esc(e.subject)}</b> ${esc(e.room)}<small>${hm(e.start)}–${hm(e.end)} · ${esc(e.teacher)}${e.cancelled?" · CANCELLED":""}</small>${e.info?`<small>${esc(e.info)}</small>`:""}</div>`).join("")}</div>`).join("")+`</div>`}
+function shift(n){const ws=Object.keys(D.timetable).sort(),i=ws.indexOf(wk)+n;if(ws[i]){wk=ws[i];render()}}
+const list=(a,f,empty)=>`<div class="card">${(a||[]).map(f).join("")||`<div class="mut">${empty}</div>`}</div>`;
+const views={today,timetable,
+  homework:()=>list(D.homework,h=>`<div class="row"><span class="t">${esc(h.due.slice(5))}</span><span><span class="s">${esc(h.subject)}</span> ${esc(h.text)}${h.done?` <span class="mut">(done)</span>`:""}</span></div>`,"No homework."),
+  exams:()=>list(D.exams,exRow,"No exams."),
+  plan:()=>{const t=iso(new Date()),all=D.plan||[],up=all.filter(p=>p.date>=t),old=all.filter(p=>p.date<t).reverse();
+    return `<div class="card"><h2>Upcoming</h2>${up.map(planRow).join("")||`<div class="mut">Nothing planned.</div>`}</div>`+(old.length?`<div class="card" style="margin-top:10px"><h2>Last 7 days</h2>${old.map(planRow).join("")}</div>`:"")},changes:()=>list(D.changes,chRow,"No changes."),
+  grades:()=>`<div class="card">${(D.grades||[]).length?`<table><tr><th>Subject<th>Average<th>Marks</tr>${D.grades.map(g=>`<tr><td>${esc(g.subject)}<td>${g.average??"–"}<td>${esc(g.marks.join(", "))}`).join("")}</table>`:`<div class="mut">No grades.</div>`}</div>`,
+  absences:()=>{const a=D.absences||{limits:[],list:[]};return `<div class="card"><p>${a.total||0} absences · ${a.excused||0} excused · ${a.open||0} open · ${a.days||0} days</p>${(a.limits||[]).length?`<table><tr><th>Subject<th>Missed<th>Status</tr>${a.limits.map(x=>`<tr><td>${esc(x.subject)}<td>${x.missed}/${x.total} (${Math.round(x.pct*100)}%)<td>${esc(x.level)}`).join("")}</table>`:""}${(a.list||[]).map(x=>`<div class="row"><span class="t">${esc(x.start.slice(5))}</span><span>${x.excused?"excused":"open"} ${esc(x.reason)}</span></div>`).join("")}</div>`}};
+function render(){
+  if(!D)return;
+  if(WALL){$("#app").innerHTML=wall();return}
+  const tabs=Object.entries(TABS).filter(([k])=>has(k));if(!tabs.some(([k])=>k===tab))tab=tabs[0]?tabs[0][0]:"today";
+  $("#app").innerHTML=`<header><h1>School overview</h1>${tabs.map(([k,v])=>`<button class="${k===tab?"on":""}" onclick="tab='${k}';render()">${v}</button>`).join(" ")}<span class="mut" style="margin-left:auto">Updated ${D.synced_at?new Date(D.synced_at*1000).toLocaleString("en-GB"):"never"} · read-only</span></header><main>${views[tab]()}</main>`}
+setInterval(()=>{const c=$("#clock");if(c){const n=new Date();c.textContent=pad(n.getHours())+":"+pad(n.getMinutes())}},1000);
+setInterval(load,60000);setInterval(()=>{if(WALL)render()},60000);load();
+</script><script>
+(function(){
+ const pad=n=>String(n).padStart(2,"0"),iso=d=>d.getFullYear()+"-"+pad(d.getMonth()+1)+"-"+pad(d.getDate());
+ const now=new Date(),day=n=>{const d=new Date(now);d.setDate(d.getDate()+n);return d};
+ const monday=day(-((now.getDay()+6)%7));
+ const slots=[["08:00","08:50"],["08:55","09:45"],["10:00","10:50"],["10:55","11:45"],["11:50","12:40"]];
+ const plan=[["M","HU","R201"],["D","KA","R105"],["E","BL","R112"],["B","MA","Lab 2"],["PE","SO","Gym"]];
+ const week={};
+ for(let w=0;w<2;w++){const ms=day(-((now.getDay()+6)%7)+7*w);week[iso(ms)]=[];
+  for(let i=0;i<5;i++){const d=new Date(ms);d.setDate(d.getDate()+i);
+   slots.forEach((s,k)=>{const p=plan[(k+i)%5];const cancelled=(w===0&&i===((now.getDay()+6)%7)&&k===3);
+    week[iso(ms)].push({date:iso(d),start:iso(d)+"T"+s[0],end:iso(d)+"T"+s[1],subject:p[0],teacher:p[1],room:p[2],cancelled,info:cancelled?"Teacher ill":""});});}}
+ const hw=(o,s,t,st)=>({subject:s,due:iso(day(o)),text:t,remark:"",done:false,status:st,days_left:o});
+ const data={sections:["today","timetable","homework","exams","plan","changes"],synced_at:Date.now()/1000-420,server_time:Date.now()/1000,
+  timetable:week,
+  homework:[hw(-1,"D","Finish the essay on the short story","missed"),hw(1,"E","Learn vocabulary unit 4","soon"),hw(2,"M","Exercises p. 44, 1-6","soon"),hw(6,"B","Prepare the cell biology talk","pending")],
+  exams:[{date:iso(day(4)),start:"10:00",end:"10:50",subject:"M",text:"Test: functions"},{date:iso(day(12)),start:"",end:"",subject:"E",text:"Listening test"}],
+  plan:[{date:iso(now),start:"16:30",minutes:45,subject:"E",title:"Vocabulary unit 4",notes:"flashcards",done:false},
+        {date:iso(now),start:"",minutes:30,subject:"M",title:"Maths p. 44",notes:"",done:true},
+        {date:iso(day(1)),start:"17:00",minutes:60,subject:"B",title:"Slides for the talk",notes:"",done:false}],
+  changes:[{at:Date.now()/1000-3600,kind:"timetable",text:"Cancelled: B on "+iso(now).slice(5)+" 10:55"},{at:Date.now()/1000-7200,kind:"homework",text:"New homework: M - Exercises p. 44"},{at:Date.now()/1000-9000,kind:"timetable",text:"Room change: E 10:00: R112 -> R118"}]};
+ window.SSC_update(data,false,Date.now());
+})();
+</script>
+</body></html>
