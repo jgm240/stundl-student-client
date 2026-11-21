@@ -338,6 +338,15 @@ def cmd_server(a):
     serverapp.run()
 
 
+def watch_status():
+    try:
+        import bleak  # noqa: F401
+        ble = True
+    except ImportError:
+        ble = False
+    return dict(address=core.config().get("pinetime_address"), bluetooth=ble)
+
+
 def cmd_pinetime(a):
     import asyncio
     import pinetime
@@ -798,8 +807,10 @@ def make_handler(port=None):
                 return self.send(200, json.dumps(SYNC))
             if u.path == "/api/config":
                 c = core.config()
-                return self.send(200, json.dumps(dict(configured=bool(c.get("server") and c.get("school")), server=c.get("server"),
+                return self.send(200, json.dumps(dict(configured=bool(c.get("server") and c.get("school")) or c.get("sync_mode") == "direct", server=c.get("server"),
                                                       school=c.get("school"), browser=c.get("browser", "auto"), login=LOGIN)))
+            if u.path == "/api/watch":
+                return self.send(200, json.dumps(watch_status()))
             if u.path == "/api/parent":
                 try:
                     return self.send(200, json.dumps(parent_status()))
@@ -869,6 +880,25 @@ def make_handler(port=None):
                     return self.send(400, json.dumps({"error": str(e)}))
             elif path == "/api/plan/delete":
                 core.plan_delete(con, body.get("id", 0))
+            elif path == "/api/watch/scan":
+                try:
+                    import asyncio, pinetime
+                    return self.send(200, json.dumps({"found": [{"address": a, "name": n} for a, n in asyncio.run(pinetime.scan())]}))
+                except Exception as e:
+                    return self.send(500, json.dumps({"error": str(e)[:200]}))
+            elif path == "/api/watch/pair":
+                addr = str(body.get("address", "")).strip()
+                if not re.fullmatch(r"([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}|[0-9A-Fa-f]{8}-([0-9A-Fa-f]{4}-){3}[0-9A-Fa-f]{12}", addr):
+                    return self.send(400, json.dumps({"error": "not a Bluetooth address"}))
+                import pinetime
+                pinetime.set_address(addr)
+            elif path == "/api/watch/forget":
+                import pinetime
+                pinetime.set_address(None)
+            elif path in ("/api/watch/sync", "/api/watch/test"):
+                import pinetime
+                msg = pinetime.sync(test=path.endswith("test"))
+                return self.send(200, json.dumps(dict(watch_status(), message=msg)))
             elif path == "/api/parent/install":
                 ok, err = parent_install()
                 return self.send(200 if ok else 500, json.dumps(parent_status() if ok else {"error": err[:200]}))

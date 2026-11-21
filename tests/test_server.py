@@ -280,6 +280,20 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(json.loads(c.req("GET", "/api/me")[1])["role"], "guest")
         a.req("POST", "/api/admin/config", {"web": {"guest_passwordless": False}})
 
+    def test_watch_api_is_admin_only_and_validates(self):
+        g = Client(self.port)
+        g.login("anna", "longenoughpw")
+        self.assertEqual(g.req("GET", "/api/watch")[0], 403)
+        self.assertEqual(g.req("POST", "/api/watch/pair", {"address": "AA:BB:CC:DD:EE:FF"})[0], 403)
+        a = Client(self.port)
+        a.login("boss", "twelve-chars!")
+        self.assertEqual(json.loads(a.req("GET", "/api/watch")[1])["address"], None)
+        self.assertEqual(a.req("POST", "/api/watch/pair", {"address": "not an address; rm -rf"})[0], 400)
+        self.assertEqual(a.req("POST", "/api/watch/pair", {"address": "AA:BB:CC:DD:EE:FF"})[0], 200)
+        self.assertEqual(json.loads(a.req("GET", "/api/watch")[1])["address"], "AA:BB:CC:DD:EE:FF")
+        a.req("POST", "/api/watch/forget", {})
+        self.assertIsNone(json.loads(a.req("GET", "/api/watch")[1])["address"])
+
     def test_logout_ends_the_session(self):
         c = Client(self.port)
         c.login("anna", "longenoughpw")

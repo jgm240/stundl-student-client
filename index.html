@@ -399,7 +399,7 @@ function render(){
   $("#main").innerHTML=({today,tt,hw,ex,gr,ch,ms,se,pl,pe,set:sett})[tab]();
   if(tab==="se"&&f)$("#q").focus();
   const cv=$("#conv");if(cv)cv.scrollTop=cv.scrollHeight;
-  if(tab==="set"&&!SNAP)loadParent();
+  if(tab==="set"&&!SNAP){loadParent();loadWatch()}
 }
 let CFG={login:{}},BR=[];
 const lastErr=l=>(l||"").trim().split("\n").filter(x=>x.trim()&&!/^[╔║╚═ ]/.test(x)).pop()||"failed - see ~/.ssc for logs";
@@ -411,7 +411,21 @@ function appearanceCard(){const m=getTheme();return `<h2>Appearance</h2><div cla
 function sett(){return sett0()+appearanceCard()+hwSettings()+aboutCard()}
 function sett0(){return `<h2>School &amp; login</h2><div class="item"><div class="b"><p>School: <b>${esc(CFG.school||"-")}</b> (${esc(CFG.server||"")})</p>
   <div class="bar">Browser for login: ${brSelect("brs",CFG.browser)}<button onclick="post('/api/browser',{browser:$('#brs').value}).then(()=>alert('Saved. Takes effect at the next login.'))">Save</button></div>
-  <button onclick="setupView()">Choose another school / log in again</button></div></div><div id="pc"></div>`}
+  <button onclick="setupView()">Choose another school / log in again</button></div></div><div id="wc"></div><div id="pc"></div>`}
+let WM=null,WMSG="";
+async function loadWatch(){if(!$("#wc"))return;try{WM=await (await fetch("/api/watch")).json()}catch(e){return}renderWatch()}
+function renderWatch(){const el=$("#wc");if(!el||!WM)return;
+  el.innerHTML=`<h2>Watch (PineTime / JWatch)</h2><div class="item"><div class="b">
+   <p class="mut" style="margin-top:0">Sets the watch clock and sends changes, exams and homework over Bluetooth. On the JWatch firmware it also fills the <b>School</b> screen. Nothing is read from the watch.</p>
+   ${WM.bluetooth?"":`<p class="mut">Bluetooth support is not installed here (<code>pip install bleak</code>).</p>`}
+   ${WM.address?`<p>Paired watch: <b>${esc(WM.address)}</b></p><div class="bar"><button class="on" onclick="watchAct('sync')">Sync now</button><button onclick="watchAct('test')">Send test</button><button onclick="watchAct('forget')">Forget</button></div>`
+     :`<div class="bar"><button class="on" ${WM.bluetooth?"":"disabled"} onclick="watchScan()">Find my watch</button></div><div id="wfound"></div>`}
+   <p class="mut" id="wmsg">${esc(WMSG)}</p></div></div>`}
+async function watchAct(a){WMSG="Working... keep the watch close.";renderWatch();const r=await post("/api/watch/"+a);const j=await r.json().catch(()=>({}));WMSG=j.message||j.error||"";await loadWatch()}
+async function watchScan(){const f=$("#wfound");f.textContent="Searching (8 s)...";const r=await post("/api/watch/scan");const j=await r.json().catch(()=>({}));
+  if(!r.ok){f.textContent=j.error||"Search failed";return}
+  f.innerHTML=j.found.length?j.found.map(w=>`<div class="bar"><span>${esc(w.name||"Watch")} <small>${esc(w.address)}</small></span><button onclick="watchPair('${esc(w.address)}')">Use this</button></div>`).join(""):"No watch found. Wake it and keep it close."}
+async function watchPair(a){await post("/api/watch/pair",{address:a});WMSG="Saved. Press Sync now.";await loadWatch()}
 let PM=null;
 async function loadParent(){if(!$("#pc"))return;try{PM=await (await fetch("/api/parent")).json()}catch(e){return}renderParent()}
 const SECN={today:"Today",timetable:"Timetable",homework:"Homework",exams:"Exams",plan:"Study plan",changes:"Changes",grades:"Grades",absences:"Absences"};
