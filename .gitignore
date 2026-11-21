@@ -12,3 +12,5 @@ ios/*.xcodeproj
 ios/Info.plist
 ios/*.ipa
 .DS_Store
+ios/Info-Safe.plist
+ios/*.ipa

@@ -1,16 +1,20 @@
-# Builds the unsigned SSC-SAFE iOS IPA on GitHub's macOS servers (they have Xcode), so no Xcode is needed locally.
-# Run it from the Actions tab ("Run workflow") and download SSC-SAFE-unsigned.ipa from the run's artifacts.
-name: Build unsigned SSC-SAFE IPA
+# Compiles both iOS apps on GitHub's macOS servers (they have Xcode) and attaches the unsigned IPAs.
+# Run it from the Actions tab ("Run workflow"), then download the artifact.
+name: Build unsigned iOS IPAs (SSC-SAFE and SSC Mobile)
 on:
-  workflow_dispatch:   # run it by hand from the Actions tab
+  workflow_dispatch:
 jobs:
   ipa:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Logic self-check (no iOS needed): TOTP vectors + WebUntis client vs a simulated server
+        run: |
+          swiftc -O ios/Mobile/TOTP.swift ios/Mobile/UntisAPI.swift ios/Tools/main.swift -o ssc-selfcheck
+          ./ssc-selfcheck
       - run: brew install xcodegen
       - run: ./ios/build_ipa.sh
       - uses: actions/upload-artifact@v4
         with:
-          name: SSC-SAFE-unsigned-ipa
-          path: ios/SSC-SAFE-unsigned.ipa
+          name: SSC-iOS-unsigned-ipas
+          path: ios/*.ipa

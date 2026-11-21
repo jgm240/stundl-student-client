@@ -19,3 +19,12 @@ func setKeepAwake(_ on: Bool) {
     UIApplication.shared.isIdleTimerDisabled = on
     #endif
 }
+
+/// Don't leave secrets in the clipboard after pasting them.
+func clearClipboard() {
+    #if canImport(UIKit)
+    UIPasteboard.general.string = ""
+    #else
+    NSPasteboard.general.clearContents()
+    #endif
+}

@@ -1,4 +1,4 @@
-name: SSCSafe
+name: SSC
 options:
   bundleIdPrefix: com.stundl
   deploymentTarget:
@@ -9,11 +9,13 @@ settings:
     MARKETING_VERSION: "1.0"
     CURRENT_PROJECT_VERSION: "1"
 targets:
+  # SSC-SAFE: only a client of SSC's read-only Parent mode (no WebUntis access of its own)
   SSCSafe:
     type: application
     platform: iOS
     sources:
-      - path: Sources
+      - path: Shared
+      - path: Safe
       - path: Assets.xcassets
       - path: ../parent.html          # the very same Parent page the Mac serves, bundled so it works offline
         buildPhase: resources
@@ -30,9 +32,32 @@ targets:
         INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
         INFOPLIST_KEY_NSLocalNetworkUsageDescription: "SSC-SAFE connects to your Mac on your home network to show your school overview."
     info:
-      path: Info.plist
+      path: Info-Safe.plist
       properties:
         CFBundleDisplayName: SSC-SAFE
         NSLocalNetworkUsageDescription: "SSC-SAFE connects to your Mac on your home network to show your school overview."
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
+  # SSC Mobile: autonomous - logs in to WebUntis itself with the Untis Mobile key (kept in the Keychain, behind Face ID)
+  SSCMobile:
+    type: application
+    platform: iOS
+    sources:
+      - path: Shared
+      - path: Mobile
+      - path: Assets.xcassets
+      - path: ../parent.html
+        buildPhase: resources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.stundl.ssc.mobile
+        PRODUCT_NAME: SSC-Mobile
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        TARGETED_DEVICE_FAMILY: "1,2"
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: SSC Mobile
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_NSCameraUsageDescription: "SSC Mobile scans the WebUntis QR code with the camera. Nothing is recorded."
+        INFOPLIST_KEY_NSFaceIDUsageDescription: "SSC Mobile unlocks your WebUntis key with Face ID."
+        INFOPLIST_KEY_UISupportedInterfaceOrientations: "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
+        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
