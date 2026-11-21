@@ -18,7 +18,14 @@ python3 -m venv "$BUILD/venv"
   --hidden-import objc --hidden-import AppKit --hidden-import Foundation --hidden-import WebKit \
   app_main.py
 APP="dist/Stundl Student Client.app"
-/usr/libexec/PlistBuddy -c "Add :NSHighResolutionCapable bool true" "$APP/Contents/Info.plist" 2>/dev/null || true
+PL="$APP/Contents/Info.plist"
+pb() { /usr/libexec/PlistBuddy -c "$1" "$PL" 2>/dev/null || /usr/libexec/PlistBuddy -c "Set ${1#Add }" "$PL" 2>/dev/null || true; }
+pb "Add :NSHighResolutionCapable bool true"
+pb "Add :NSBluetoothAlwaysUsageDescription string SSC uses Bluetooth only to send your timetable, exams and homework to your own smartwatch (PineTime / JWatch). Nothing is read from the watch."
+pb "Add :LSMinimumSystemVersion string 11.0"
+pb "Add :CFBundleVersion string 1"
+pb "Add :CFBundleSupportedPlatforms array"
+pb "Add :CFBundleSupportedPlatforms:0 string MacOSX"
 codesign --force --deep --sign "$ID" --timestamp=none "$APP"
 codesign --verify --deep --strict "$APP" && echo "Built and signed ($ID): $PWD/$APP"
 rm -rf "$BUILD"
