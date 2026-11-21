@@ -29,7 +29,7 @@ SOURCE = "/run/live/rootfs/filesystem.squashfs/"
 
 
 class Runner:
-    def __init__(self, dry=False, log=print):
+    def __init__(self, dry=False, log=lambda m: print(m, flush=True)):
         self.dry, self.log = dry, log
 
     def __call__(self, cmd, check=True, input=None, env=None):
@@ -134,8 +134,11 @@ def install(ans, run, root=TARGET, efi=None, a=None):
         step("Removing the live-system parts")
         ch("sh", "-c", "apt-get -y purge live-boot live-boot-initramfs-tools live-config live-config-systemd live-config-sysvinit 2>/dev/null || "
                        "dpkg --purge --force-depends live-boot live-boot-initramfs-tools live-config live-config-systemd || true")
-        ch("sh", "-c", "rm -f /etc/systemd/system/getty@tty1.service.d/*live* ; "
-                       "sed -i 's/^GRUB_CMDLINE_LINUX_DEFAULT=.*/GRUB_CMDLINE_LINUX_DEFAULT=\"quiet\"/;s/^GRUB_TIMEOUT=.*/GRUB_TIMEOUT=2/' /etc/default/grub")
+        if not run.dry:   # the image ships no /etc/default/grub, so write the whole file
+            (root / "etc/default").mkdir(parents=True, exist_ok=True)
+            (root / "etc/default/grub").write_text(
+                'GRUB_DEFAULT=0\nGRUB_TIMEOUT=2\nGRUB_DISTRIBUTOR="SSC Server"\nGRUB_CMDLINE_LINUX_DEFAULT="quiet"\n'
+                'GRUB_CMDLINE_LINUX="console=tty0 console=ttyS0,115200"\nGRUB_DISABLE_OS_PROBER=true\n')
 
         step("Installing the boot loader")
         ch("update-initramfs", "-u", "-k", "all")

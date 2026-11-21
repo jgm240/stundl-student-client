@@ -7,7 +7,7 @@ set -euo pipefail
 MODE=$1; ISO=$2; ARCH=$3
 W=$(mktemp -d); trap 'kill $(jobs -p) 2>/dev/null || true' EXIT
 Q=qemu-system-x86_64; [ "$ARCH" = i386 ] && Q=qemu-system-i386
-ACCEL=""; [ -w /dev/kvm ] && ACCEL="-enable-kvm -cpu host" || ACCEL="-cpu max"
+ACCEL=""; [ -w /dev/kvm ] && ACCEL="-enable-kvm -cpu max" || ACCEL="-cpu max"
 PW='Twelve-chars-ok1'
 echo "== $MODE $ARCH ($Q $ACCEL)"
 
