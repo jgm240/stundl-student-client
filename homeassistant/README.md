@@ -6,8 +6,9 @@ the Mac is off or asleep.
 
 ## Install
 1. On your Mac: SSC → Settings → **Parent mode → Turn on**, then **Copy browser link**.
-2. Copy the folder `custom_components/ssc_student_client` into your Home Assistant `config/custom_components/`
-   (or add this repository to HACS as a custom repository), then restart Home Assistant.
+2. Install the integration: either add this repository to **HACS** as a custom repository (Integration), or copy the folder
+   `custom_components/ssc_student_client` from this repository into your Home Assistant `config/custom_components/`.
+   Then restart Home Assistant.
 3. Settings → Devices & services → **Add integration** → *Stundl Student Client (SSC)* → paste the link.
 
 The link must be reachable from Home Assistant (same home network). Fetch interval: Configure → 5 minutes by default.

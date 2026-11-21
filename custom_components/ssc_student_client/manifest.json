@@ -1,0 +1,14 @@
+{
+  "domain": "ssc_student_client",
+  "name": "Stundl Student Client (SSC)",
+  "codeowners": [
+    "@jgm240"
+  ],
+  "config_flow": true,
+  "documentation": "https://github.com/jgm240/stundl-student-client",
+  "integration_type": "service",
+  "iot_class": "local_polling",
+  "requirements": [],
+  "version": "1.0.0",
+  "issue_tracker": "https://github.com/jgm240/stundl-student-client/issues"
+}

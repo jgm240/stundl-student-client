@@ -25,8 +25,8 @@ Xcode, run the "Build unsigned SSC-SAFE IPA" GitHub Action and download the arti
 sideloading tool (AltStore, Sideloadly, ...) before they install.
 
 ## Home Assistant
-`homeassistant/` is a custom integration that fetches the Parent-mode data by itself, caches it, and exposes sensors,
-binary sensors and a calendar. See `homeassistant/README.md`.
+`custom_components/ssc_student_client` is a custom integration (HACS-ready) that fetches the Parent-mode data by itself, caches it, and exposes sensors,
+binary sensors and a calendar. Setup guide: `homeassistant/README.md`.
 
 ## Security
 No password is ever stored. The WebUntis session and the Parent link secret are kept in the macOS Keychain, not in
