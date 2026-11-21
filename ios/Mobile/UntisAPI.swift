@@ -92,7 +92,8 @@ enum Untis {
             out.append(["date": d, "start": "\(d)T\(s)", "end": "\(d)T\(e)",
                         "subject": names(master, "subjects", p["su"]), "teacher": names(master, "teachers", p["te"]),
                         "room": names(master, "rooms", p["ro"]), "cancelled": state == "CANCEL" || state == "CANCELLED",
-                        "info": (p["lstext"] as? String) ?? (p["substText"] as? String) ?? ""])
+                        "info": (p["lstext"] as? String) ?? (p["substText"] as? String) ?? "",
+                        "topic": (p["lstext"] as? String) ?? "", "substitution": (p["substText"] as? String) ?? ""])
         }
         return out.sorted { ($0["start"] as! String) < ($1["start"] as! String) }
     }

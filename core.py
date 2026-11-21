@@ -213,32 +213,54 @@ def hhmm(v):
     return s
 
 
+def _plain(t):
+    """Text from a field that may contain HTML."""
+    return re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", " ", str(t or "")))).strip()
+
+
 def _names(e):
-    out = {}
+    """Short names by type (SUBJECT/TEACHER/ROOM/CLASS...), the long names, and what a substitution changed."""
+    short, long_, changes = {}, {}, []
     for i in range(1, 6):
         for p in e.get("position%d" % i) or []:
-            c = p.get("current") or p.get("removed") or {}
+            cur, old = p.get("current") or {}, p.get("removed") or {}
+            c = cur or old
+            kind = (c.get("type") or "OTHER").upper()
             n = c.get("shortName") or c.get("displayName") or c.get("longName")
             if n:
-                out.setdefault((c.get("type") or "OTHER").upper(), []).append(n)
-    return out
+                short.setdefault(kind, []).append(n)
+                ln = c.get("longName") or c.get("displayName") or n
+                long_.setdefault(kind, []).append(ln)
+            if cur and old:
+                a_, b_ = old.get("shortName") or old.get("displayName"), cur.get("shortName") or cur.get("displayName")
+                if a_ and b_ and a_ != b_:
+                    changes.append(f"{kind.title()}: {a_} \u2192 {b_}")
+            elif old and not cur:
+                changes.append(f"{kind.title()} {old.get('shortName') or old.get('displayName') or ''} removed".strip())
+    return short, long_, changes
 
 
 def tt_entries(data):
     res = []
     for d in (data or {}).get("days", []):
         for e in d.get("gridEntries", []):
-            n = _names(e)
+            n, ln, changes = _names(e)
             if not any(n.get(t) for t in ("SUBJECT", "TEACHER", "ROOM")):  # untyped: guess by position
                 g = lambda i: ", ".join(filter(None, ((p.get("current") or p.get("removed") or {}).get("shortName")
                                                       for p in e.get("position%d" % i) or [])))
                 n = {"SUBJECT": [g(1)], "TEACHER": [g(2)], "ROOM": [g(3)]}
+                ln = dict(n)
             st = e.get("status") or ""
+            j = lambda m, k: ", ".join(m.get(k, []))
+            topic, note, subst = _plain(e.get("lessonText")), _plain(e.get("notesAll")), _plain(e.get("substitutionText"))
             res.append(dict(
                 date=d.get("date"), start=e["duration"]["start"], end=e["duration"]["end"],
-                subject=", ".join(n.get("SUBJECT", [])), teacher=", ".join(n.get("TEACHER", [])),
-                room=", ".join(n.get("ROOM", [])), status=st, cancelled="CANCEL" in st.upper(),
-                info=e.get("lessonInfo") or e.get("substitutionText") or e.get("notesAll") or ""))
+                subject=j(n, "SUBJECT"), teacher=j(n, "TEACHER"), room=j(n, "ROOM"), status=st, cancelled="CANCEL" in st.upper(),
+                info=_plain(e.get("lessonInfo")) or subst or note,
+                # details for the lesson view
+                subject_long=j(ln, "SUBJECT"), teacher_long=j(ln, "TEACHER"), room_long=j(ln, "ROOM"),
+                group=_plain(e.get("studentGroup")) or j(n, "CLASS"), topic=topic, note=note, substitution=subst,
+                changes=changes, kind=str(e.get("type") or ""), color=str(e.get("color") or "")))
     res.sort(key=lambda x: x["start"])
     return res
 
@@ -361,6 +383,8 @@ def _diff_tt(old, new):
             out.append(("timetable", f"Room change: {label}: {o['room'] or '-'} -> {e['room'] or '-'}"))
         if e["teacher"] != o["teacher"]:
             out.append(("timetable", f"Substitution: {label}: {o['teacher'] or '-'} -> {e['teacher'] or '-'}"))
+        if e.get("topic") and e["topic"] != o.get("topic"):
+            out.append(("timetable", f"Lesson topic: {label}: {e['topic'][:80]}"))
         if e["info"] and e["info"] != o["info"]:
             out.append(("timetable", f"Note: {label}: {e['info']}"))
     for key, o in om.items():
@@ -476,7 +500,10 @@ def parent_state(con=None):
     out = dict(synced_at=st["synced_at"], server_time=time.time(), sections=secs)
     if "timetable" in secs or "today" in secs:
         out["timetable"] = {wk: [dict(date=e["date"], start=e["start"], end=e["end"], subject=e["subject"], teacher=e["teacher"],
-                                      room=e["room"], cancelled=e["cancelled"], info=e["info"]) for e in es]
+                                      room=e["room"], cancelled=e["cancelled"], info=e["info"], subject_long=e["subject_long"],
+                                      teacher_long=e["teacher_long"], room_long=e["room_long"], group=e["group"], topic=e["topic"],
+                                      note=e["note"], substitution=e["substitution"], changes=e["changes"], color=e["color"])
+                                 for e in es]
                             for wk, es in st["timetable"].items()}
     if "homework" in secs or "today" in secs:
         out["homework"] = [dict(subject=h["subject"], due=h["due"], text=h["text"], remark=h["remark"], done=h["done"],

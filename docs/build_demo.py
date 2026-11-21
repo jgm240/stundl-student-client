@@ -23,7 +23,8 @@ POST = """<script>
  for(let w=0;w<2;w++){const ms=day(-((now.getDay()+6)%7)+7*w);week[iso(ms)]=[];
   for(let i=0;i<5;i++){const d=new Date(ms);d.setDate(d.getDate()+i);
    slots.forEach((s,k)=>{const p=plan[(k+i)%5];const cancelled=(w===0&&i===((now.getDay()+6)%7)&&k===3);
-    week[iso(ms)].push({date:iso(d),start:iso(d)+"T"+s[0],end:iso(d)+"T"+s[1],subject:p[0],teacher:p[1],room:p[2],cancelled,info:cancelled?"Teacher ill":""});});}}
+    const LONG={M:"Mathematics",D:"German",E:"English",B:"Biology",PE:"Physical Education"},TOP={M:"Fractions: adding and subtracting with unlike denominators",D:"Short story analysis: narrator and point of view",E:"Unit 4 - Talking about the past",B:"The cell: organelles and their functions",PE:""};
+    week[iso(ms)].push({date:iso(d),start:iso(d)+"T"+s[0],end:iso(d)+"T"+s[1],subject:p[0],teacher:p[1],room:p[2],cancelled,info:cancelled?"Teacher ill":"",subject_long:LONG[p[0]],teacher_long:p[1],room_long:p[2],group:"5A",topic:TOP[p[0]],note:(p[0]==="M"||p[0]==="E")?"Bring your workbook":"",substitution:cancelled?"Cover lesson - worksheet":"",changes:[]});});}}
  const hw=(o,s,t,st)=>({subject:s,due:iso(day(o)),text:t,remark:"",done:false,status:st,days_left:o});
  const data={sections:["today","timetable","homework","exams","plan","changes"],synced_at:Date.now()/1000-420,server_time:Date.now()/1000,
   timetable:week,

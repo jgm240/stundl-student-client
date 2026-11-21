@@ -108,7 +108,7 @@ def convert_timetable(result: dict, master: dict) -> list[dict]:
                 date=d, start=f"{d}T{_hhmm(p['startTime'])}", end=f"{d}T{_hhmm(p['endTime'])}",
                 subject=_names(master, "subjects", p.get("su")), teacher=_names(master, "teachers", p.get("te")),
                 room=_names(master, "rooms", p.get("ro")), cancelled=str(p.get("cellState", "")).upper() in ("CANCEL", "CANCELLED"),
-                info=p.get("lstext") or p.get("substText") or ""))
+                info=p.get("lstext") or p.get("substText") or "", topic=p.get("lstext") or "", substitution=p.get("substText") or ""))
         except (KeyError, ValueError, TypeError):
             continue
     return sorted(out, key=lambda e: e["start"])

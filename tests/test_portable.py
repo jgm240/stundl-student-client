@@ -143,6 +143,24 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(m["title"], "SSC")
         self.assertEqual(m["homework"], [])
 
+    def test_lesson_details_are_kept(self):
+        e = {"duration": {"start": "2026-11-23T10:00", "end": "2026-11-23T10:50"}, "status": "CHANGED", "type": "NORMAL_TEACHING_PERIOD",
+             "lessonText": "Chapter 4: <b>fractions</b>", "notesAll": "Bring a calculator", "studentGroup": "5A/2", "color": "#ff8800",
+             "substitutionText": "Cover lesson",
+             "position1": [{"current": {"type": "CLASS", "shortName": "5A"}}],
+             "position2": [{"current": {"type": "TEACHER", "shortName": "CD", "longName": "Carla Dorn"}, "removed": {"type": "TEACHER", "shortName": "AB"}}],
+             "position3": [{"current": {"type": "SUBJECT", "shortName": "M", "longName": "Mathematics"}}],
+             "position4": [{"current": {"type": "ROOM", "shortName": "R2", "longName": "Room 2"}, "removed": {"type": "ROOM", "shortName": "R1"}}]}
+        x = core.tt_entries({"days": [{"date": "2026-11-23", "gridEntries": [e]}]})[0]
+        self.assertEqual((x["subject"], x["subject_long"], x["teacher"], x["teacher_long"], x["room"]), ("M", "Mathematics", "CD", "Carla Dorn", "R2"))
+        self.assertEqual(x["topic"], "Chapter 4: fractions")          # HTML removed
+        self.assertEqual((x["note"], x["group"], x["substitution"], x["color"]), ("Bring a calculator", "5A/2", "Cover lesson", "#ff8800"))
+        self.assertEqual(x["changes"], ["Teacher: AB \u2192 CD", "Room: R1 \u2192 R2"])
+        before = {"days": [{"date": "2026-11-23", "gridEntries": [{**e, "lessonText": ""}]}]}
+        after = {"days": [{"date": "2026-11-23", "gridEntries": [e]}]}
+        changes = [t for _, t in core.diff("timetable:2099-01-01", before, after)]
+        self.assertTrue(any("Lesson topic" in t and "fractions" in t for t in changes), changes)   # a newly entered topic is reported
+
     def test_plan_roundtrip(self):
         con = core.db()
         i = core.plan_add(con, title="Learn", minutes=30)
