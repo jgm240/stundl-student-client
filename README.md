@@ -10,6 +10,9 @@ wall displays, and your own study plan.
 own sign-in in a browser window; your password is never seen or stored. WebUntis' internal endpoints are
 undocumented and may change or be restricted by your school.
 
+## Install
+See `INSTALL.md` for Windows, Linux (GUI + terminal), iPhone (SSC Mobile / SSC-SAFE) and Home Assistant.
+
 ## Build
 ```bash
 ./build_app.sh          # builds and signs "dist/Stundl Student Client.app" (no Python needed to run it)
@@ -19,7 +22,7 @@ Run `"dist/Stundl Student Client.app/Contents/MacOS/Stundl Student Client" -h` f
 
 ## SSC-SAFE (Stundl Safe Client) for iOS
 `ios/` is an iOS app that is *only* a client of Parent mode: it shows the read-only Parent page and keeps a cached
-copy of its data for offline use. It never asks for or sends WebUntis credentials; the only thing it holds
+copy of its data for offline use. (`SSC Mobile`, in the same folder, is the autonomous variant: it logs in to WebUntis itself with the Untis Mobile key.) It never asks for or sends WebUntis credentials; the only thing it holds
 is the secret Parent link (in the Keychain). Build an **unsigned** IPA with full Xcode (`ios/build_ipa.sh`) or, without
 Xcode, run the "Build unsigned SSC-SAFE IPA" GitHub Action and download the artifact. Unsigned IPAs must be signed by a
 sideloading tool (AltStore, Sideloadly, ...) before they install.
