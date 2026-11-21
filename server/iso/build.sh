@@ -41,7 +41,6 @@ cp server/*.py server/*.html "$WORK/config/includes.chroot/opt/ssc/server/"
 echo "$VERSION" > "$WORK/config/includes.chroot/opt/ssc/VERSION"
 cd "$WORK"
 cp "$HERE/hooks/"* config/hooks/normal/
-for h in config/hooks/normal/*.hook.binary; do [ -f "$h" ] && mv "$h" "config/hooks/normal/$(basename "$h")"; done
 
 lb build 2>&1 | tail -n 200
 ISO=$(ls ./*.iso | head -1)
