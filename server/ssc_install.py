@@ -237,6 +237,7 @@ def finish(raw, disks, run, interactive=False):
         wt("--msgbox", "Installed. Remove the installation medium; the server restarts now.\nAfter the restart log in and run:  ssconfig showip", "11", "70")
         subprocess.run(["reboot"])
     else:
+        time.sleep(5)          # let the last log lines reach the console before the machine goes down
         subprocess.run(["poweroff"])
     return 0
 

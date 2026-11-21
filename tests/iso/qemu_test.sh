@@ -8,13 +8,15 @@ MODE=$1; ISO=$2; ARCH=$3
 W=$(mktemp -d); trap 'kill $(jobs -p) 2>/dev/null || true' EXIT
 Q=qemu-system-x86_64; [ "$ARCH" = i386 ] && Q=qemu-system-i386
 ACCEL=""; [ -w /dev/kvm ] && ACCEL="-enable-kvm -cpu max" || ACCEL="-cpu max"
+SLOW=1
+if [ "$ARCH" = i386 ]; then ACCEL="-cpu max"; SLOW=4; fi     # 32-bit guests are emulated (KVM hangs on the CI hosts): slower, so wait longer
 PW='Twelve-chars-ok1'
 echo "== $MODE $ARCH ($Q $ACCEL)"
 
 if [ "$MODE" = live ]; then
-  timeout 420 $Q $ACCEL -m 1024 -cdrom "$ISO" -boot d -monitor none -serial file:$W/serial.log -display none -no-reboot \
+  timeout $((420*SLOW)) $Q $ACCEL -m 1024 -cdrom "$ISO" -boot d -monitor none -serial file:$W/serial.log -display none -no-reboot \
      -netdev user,id=n0 -device virtio-net-pci,netdev=n0 &
-  for i in $(seq 1 100); do grep -q "SSC Server" "$W/serial.log" 2>/dev/null && grep -q "login:" "$W/serial.log" 2>/dev/null && break; sleep 4; done
+  for i in $(seq 1 $((100*SLOW))); do grep -q "SSC Server" "$W/serial.log" 2>/dev/null && grep -q "login:" "$W/serial.log" 2>/dev/null && break; sleep 4; done
   tail -n 30 "$W/serial.log" || true
   grep -q "login:" "$W/serial.log" && echo "LIVE BOOT OK"; exit $?
 fi
@@ -27,7 +29,7 @@ J
 truncate -s 16M $W/ans.img; mkfs.ext4 -q -F -L SSCANS -d $W/ans $W/ans.img
 BIOSARG=""; [ "${UEFI:-0}" = 1 ] && BIOSARG="-bios /usr/share/ovmf/OVMF.fd"
 echo "== phase 1: install"
-timeout 1500 $Q $ACCEL -m 1536 $BIOSARG -cdrom "$ISO" -boot d -drive file=$W/disk.qcow2,if=virtio,format=qcow2 \
+timeout $((1500*SLOW)) $Q $ACCEL -m 1536 $BIOSARG -cdrom "$ISO" -boot d -drive file=$W/disk.qcow2,if=virtio,format=qcow2 \
    -drive file=$W/ans.img,if=virtio,format=raw -monitor none -serial file:$W/install.log -display none -no-reboot \
    -netdev user,id=n0 -device virtio-net-pci,netdev=n0 || true
 tail -n 40 $W/install.log
@@ -35,7 +37,7 @@ grep -q "SSC-INSTALL-OK" $W/install.log || { echo "INSTALL FAILED"; exit 1; }
 echo "== phase 2: boot the installed system"
 $Q $ACCEL -m 1024 $BIOSARG -drive file=$W/disk.qcow2,if=virtio,format=qcow2 -monitor none -serial file:$W/boot.log -display none \
    -netdev user,id=n0,hostfwd=tcp:127.0.0.1:18080-:8080,hostfwd=tcp:127.0.0.1:18766-:8766 -device virtio-net-pci,netdev=n0 &
-for i in $(seq 1 90); do curl -fs http://127.0.0.1:18080/health >/dev/null 2>&1 && break; sleep 4; done
+for i in $(seq 1 $((90*SLOW))); do curl -fs http://127.0.0.1:18080/health >/dev/null 2>&1 && break; sleep 4; done
 curl -fs http://127.0.0.1:18080/health || { tail -n 60 $W/boot.log; echo "SERVER NOT UP"; exit 1; }
 echo
 J() { python3 - "$@"; }
