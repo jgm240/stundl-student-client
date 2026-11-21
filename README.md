@@ -33,6 +33,9 @@ sideloading tool (AltStore, Sideloadly, ...) before they install.
 `custom_components/ssc_student_client` is a custom integration (HACS-ready) that fetches the Parent-mode data by itself, caches it, and exposes sensors,
 binary sensors and a calendar. Setup guide: `homeassistant/README.md`.
 
+## SSC Server (ISO)
+A Debian-based, installable server image (64-bit and 32-bit) with guest/user/admin accounts, an admin panel and the `ssconfig` tool (`ssconfig showip`, `ssconfig showlink`, custom IP, required long links, SSH settings). See `server/README.md`.
+
 ## Security
 No password is ever stored. The WebUntis session and the Parent link secret are kept in the macOS Keychain, not in
 files; the data folder is private to your account; the local app server only answers the window the app opened; browser

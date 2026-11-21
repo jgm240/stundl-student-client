@@ -7,3 +7,4 @@ pywebview[qt]>=5; sys_platform == "linux"
 rumps>=0.4; sys_platform == "darwin"
 pystray>=0.19; sys_platform != "darwin"
 Pillow>=10; sys_platform != "darwin"
+bleak

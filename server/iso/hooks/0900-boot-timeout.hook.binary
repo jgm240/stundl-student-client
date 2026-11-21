@@ -1,0 +1,12 @@
+#!/bin/sh
+# Boot the first menu entry by itself after 3 s (headless installs and CI have nobody to press Enter), menu also on serial.
+set -e
+[ -d binary/isolinux ] && cd binary
+for f in isolinux/*.cfg; do
+  [ -f "$f" ] || continue
+  sed -i -e 's/^timeout .*/timeout 30/I' -e 's/^prompt .*/prompt 0/I' "$f"
+done
+[ -f isolinux/isolinux.cfg ] && { grep -qi '^timeout' isolinux/isolinux.cfg || echo 'timeout 30' >> isolinux/isolinux.cfg; sed -i '1i serial 0 115200' isolinux/isolinux.cfg; }
+for g in boot/grub/grub.cfg; do
+  [ -f "$g" ] && { sed -i 's/^set timeout=.*/set timeout=3/' "$g"; grep -q '^set timeout' "$g" || sed -i '1i set timeout=3' "$g"; } || true
+done

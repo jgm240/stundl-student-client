@@ -45,6 +45,9 @@ Build and sign it with your own certificate: `./build_app.sh` → `dist/Stundl S
 See `homeassistant/README.md`: HACS custom repository `https://github.com/jgm240/stundl-student-client` (Integration),
 restart, then *Add integration → Stundl Student Client (SSC)* and choose **Autonomous** (Untis Mobile QR text) or **Parent link**.
 
+## SSC Server (bootable ISO, 64-bit and 32-bit)
+A ready-made server for your network: login accounts (guest / user / admin), an admin panel, `ssconfig`, installable to disk. See `server/README.md`.
+
 ## Build it yourself
 ```bash
 pip install -r requirements.txt pyinstaller

@@ -338,6 +338,24 @@ def cmd_server(a):
     serverapp.run()
 
 
+def cmd_pinetime(a):
+    import asyncio
+    import pinetime
+    if a.action == "scan":
+        for addr, name in asyncio.run(pinetime.scan()):
+            print(addr, name)
+    elif a.action == "pair":
+        if not a.address:
+            print("usage: ssc pinetime pair <address>")
+            return
+        pinetime.set_address(a.address)
+        print("Saved. Try: ssc pinetime test")
+    elif a.action == "forget":
+        pinetime.set_address(None)
+    else:
+        print(pinetime.sync(test=a.action == "test"))
+
+
 def cmd_untis(a):
     import untis_direct
     if a.action == "set":
@@ -362,8 +380,16 @@ def cmd_untis(a):
 
 def cmd_sync(a):
     if getattr(a, "direct", False) or str(core.config().get("sync_mode", "")) == "direct":
-        return _sync_direct(a)
-    _sync_school(a)
+        r = _sync_direct(a)
+    else:
+        r = _sync_school(a)
+    if core.config().get("pinetime_address"):      # a watch is set up: tell it what's new (never blocks or fails the sync)
+        try:
+            import pinetime
+            print(pinetime.sync())
+        except Exception as e:
+            print("Watch skipped:", e)
+    return r
 
 
 # ------------------------------------------------------------------ small commands
@@ -945,6 +971,10 @@ def main():
     x.add_argument("--direct", action="store_true", help="headless: log in with the Untis Mobile key (no browser) - used by SSC Server")
     x.set_defaults(f=cmd_sync)
     sp.add_parser("tui").set_defaults(f=lambda a: __import__("tui").run())
+    x = sp.add_parser("pinetime", help="sync with a PineTime watch (clock + notifications)")
+    x.add_argument("action", choices=["scan", "pair", "sync", "test", "forget"], nargs="?", default="sync")
+    x.add_argument("address", nargs="?")
+    x.set_defaults(f=cmd_pinetime)
     sp.add_parser("server", help="run SSC Server (web login, roles, Parent view)").set_defaults(f=cmd_server)
     for name, fn in (("serve", cmd_serve), ("gui", cmd_gui)):
         x = sp.add_parser(name); x.add_argument("--port", type=int, default=8765)

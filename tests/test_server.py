@@ -456,3 +456,71 @@ class InstallPlanTests(unittest.TestCase):
             self.assertIn(needle, text)
         self.assertLess(text.index("sgdisk"), text.index("rsync"))
         self.assertLess(text.index("rsync"), text.index("grub-install"))
+
+
+class UntisDirectTests(unittest.TestCase):
+    KEY = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"
+
+    def setUp(self):
+        isolate()
+        import untis_direct
+        self.u = untis_direct
+        self.cfg = dict(server="demo.webuntis.com", school="demo", user="max", key=self.KEY)
+
+    def test_totp_matches_rfc6238_vector(self):
+        self.assertEqual(self.u.totp(self.KEY, 59 * 1000, digits=8), "94287082")
+
+    def test_parse_qr(self):
+        q = f"untis://setschool?url=https://demo.webuntis.com&school=demo&user=max&key={self.KEY}&schoolNumber=1"
+        self.assertEqual(self.u.parse_qr(q), self.cfg)
+        for bad in ("", "http://x", "untis://setschool?school=a", "untis://setschool?url=a&school=b&user=c&key=!!"):
+            self.assertIsNone(self.u.parse_qr(bad))
+
+    def fake(self, auth_ok=True):
+        seen = []
+
+        def post(url, body):
+            m = body["method"]
+            p = body["params"][0]
+            seen.append((m, p["auth"]["user"], len(p["auth"]["otp"])))
+            if not auth_ok:
+                return {"error": {"code": -8520, "message": "bad credentials"}}
+            if m == "getUserData2017":
+                return {"result": {"userData": {"elemType": 5, "elemId": 7},
+                                   "masterData": {"subjects": [{"id": 1, "name": "M", "longName": "Math"}], "teachers": [{"id": 2, "name": "AB", "longName": "Anna B"}],
+                                                  "rooms": [{"id": 3, "name": "R1", "longName": "Room 1"}, {"id": 4, "name": "R2"}], "klassen": []}}}
+            if m == "getTimetable2017":
+                return {"result": {"timetable": {"periods": [{"date": 20261123, "startTime": 800, "endTime": 845, "su": [{"id": 1}], "te": [{"id": 2}],
+                                                              "ro": [{"id": 4, "orgid": 3}], "cellState": "SUBSTITUTION"}]}}}
+            if m == "getHomeWork2017":
+                return {"result": {"homeWorks": [{"id": 9, "lessonId": 1, "dueDate": 20261125, "text": "p.12", "completed": False}], "lessons": [{"id": 1, "subject": "Math"}]}}
+            return {"result": {"exams": []}}
+        return post, seen
+
+    def test_fetch_converts_to_ssc_format(self):
+        from datetime import date
+        post, seen = self.fake()
+        out = self.u.fetch(self.cfg, today=date(2026, 11, 23), weeks_back=0, weeks_ahead=0, post=post)
+        day = out["timetable"]["2026-11-23"]["days"][0]
+        e = day["gridEntries"][0]
+        self.assertEqual((day["date"], e["status"], e["duration"]["start"]), ("2026-11-23", "CHANGED", "2026-11-23T08:00"))
+        self.assertEqual(e["position3"][0]["current"]["shortName"], "M")
+        self.assertEqual(e["position4"][0]["removed"]["shortName"], "R1")      # room changed R1 -> R2
+        self.assertEqual(out["homework"]["data"]["homeworks"][0]["text"], "p.12")
+        self.assertTrue(all(u == "max" and n == 6 for _, u, n in seen))         # one-time codes only; the key is never sent
+
+    def test_bad_credentials_raise_auth_error(self):
+        post, _ = self.fake(auth_ok=False)
+        with self.assertRaises(self.u.AuthError):
+            self.u.fetch(self.cfg, post=post)
+
+    def test_credentials_live_in_the_vault_only(self):
+        self.u.save_credentials(self.cfg)
+        self.assertEqual(self.u.load_credentials()["user"], "max")
+        for f in Path(os.environ["SSC_DATA_DIR"]).rglob("*"):
+            if f.is_file() and f.name == "secrets.json":
+                self.assertEqual(oct(f.stat().st_mode & 0o777), "0o600")
+            elif f.is_file() and f.suffix in (".json", ".db"):
+                self.assertNotIn(self.KEY.encode(), f.read_bytes())
+        self.u.clear_credentials()
+        self.assertIsNone(self.u.load_credentials())
