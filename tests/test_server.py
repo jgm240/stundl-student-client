@@ -10,6 +10,9 @@ import unittest
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 
+if sys.platform == "win32":
+    raise unittest.SkipTest("SSC Server runs on Linux; these tests need POSIX")
+
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "server"))
