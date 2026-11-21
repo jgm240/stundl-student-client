@@ -8,7 +8,7 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Logic self-check (no iOS needed): TOTP vectors + WebUntis client vs a simulated server
+      - name: "Logic self-check (no iOS needed) - TOTP vectors and the WebUntis client against a simulated server"
         run: |
           swiftc -O ios/Mobile/TOTP.swift ios/Mobile/UntisAPI.swift ios/Tools/main.swift -o ssc-selfcheck
           ./ssc-selfcheck
