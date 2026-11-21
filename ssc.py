@@ -13,7 +13,7 @@
   ssc.py parent serve|install|remove|status|rotate|sections LIST   read-only Parent website for a wall display
   ssc.py plan [list|add TITLE|done ID|undone ID|edit ID|rm ID]   your own study plan (shown in Parent mode)
   ssc.py remind | grade-calc SUBJECT [--add 2,3] [--target 2.0]
-  ssc.py menubar [install|remove|status]   menu bar icon (install = persistent, starts at login)
+  ssc.py menubar [install|remove|status]   menu bar (macOS) / tray icon (Windows, Linux); install = starts at login
   ssc.py config set icloud true   copy offline pages to iCloud Drive (iPhone)
   ssc.py config set absence_warn 0.15 | absence_critical 0.25
   ssc.py widget                   refresh the WidgetKit widget data (see widget/)
@@ -26,13 +26,14 @@ from urllib.parse import parse_qs, quote, urlparse
 from urllib.request import Request, urlopen
 
 import core
+import jobs
 import vault
 
 HERE = Path(__file__).resolve().parent
 # The packaged app must look for browsers in the shared cache (where `ensure_browser` downloads them),
 # not inside its own bundle, where Playwright would otherwise search.
 if os.environ.get("PLAYWRIGHT_BROWSERS_PATH") in (None, "", "0"):
-    os.environ["PLAYWRIGHT_BROWSERS_PATH"] = str(Path.home() / "Library" / "Caches" / "ms-playwright")
+    os.environ["PLAYWRIGHT_BROWSERS_PATH"] = str(core.playwright_cache())
 JWT = re.compile(r"^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*$")
 
 
@@ -55,26 +56,49 @@ APPS = {  # id -> (label, .app path, playwright channel or executable inside the
 BUNDLED = {"chromium": "Chromium (downloaded once)", "firefox": "Firefox (downloaded once)", "webkit": "WebKit / Safari engine (downloaded once)"}
 
 
+def _exists_any(paths):
+    return any(Path(os.path.expandvars(p)).exists() for p in paths)
+
+
+_OTHER = {  # Windows / Linux: Chrome and Edge are driven through Playwright "channels"
+    "chrome": ("Google Chrome", {"win": [r"%ProgramFiles%\Google\Chrome\Application\chrome.exe", r"%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe",
+                                         r"%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe"],
+                                 "linux": ["/usr/bin/google-chrome", "/usr/bin/google-chrome-stable", "/opt/google/chrome/chrome"]}),
+    "msedge": ("Microsoft Edge", {"win": [r"%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe", r"%ProgramFiles%\Microsoft\Edge\Application\msedge.exe"],
+                                  "linux": ["/usr/bin/microsoft-edge", "/opt/microsoft/msedge/msedge"]}),
+}
+
+
+def _apps():
+    """id -> (label, installed?, playwright launch kwargs) for the browsers you may already have."""
+    if sys.platform == "darwin":
+        return {k: (label, Path(app).exists(), {"channel": val} if kind == "channel" else {"executable_path": str(Path(app) / val)})
+                for k, (label, app, (kind, val)) in APPS.items()}
+    osk = "win" if sys.platform.startswith("win") else "linux"
+    return {k: (label, _exists_any(paths[osk]), {"channel": k}) for k, (label, paths) in _OTHER.items()}
+
+
 def available_browsers():
     out = [dict(id="auto", label="Automatic", installed=True)]
-    out += [dict(id=k, label=v[0], installed=Path(v[1]).exists()) for k, v in APPS.items()]
+    out += [dict(id=k, label=v[0], installed=v[1]) for k, v in _apps().items()]
     out += [dict(id=k, label=v, installed=True) for k, v in BUNDLED.items()]
     return out
 
 
 def browser_spec(name):
     """-> (id, playwright engine, launch kwargs)"""
+    apps = _apps()
     if name in (None, "", "auto"):
-        name = next((k for k, v in APPS.items() if Path(v[1]).exists()), "chromium")
-    if name in APPS:
-        label, app, (kind, val) = APPS[name]
-        if Path(app).exists():
-            return name, "chromium", ({"channel": val} if kind == "channel" else {"executable_path": str(Path(app) / val)})
+        name = next((k for k, v in apps.items() if v[1]), "chromium")
+    if name in apps:
+        label, ok, kw = apps[name]
+        if ok:
+            return name, "chromium", kw
         print(f"{label} not found - using bundled Chromium instead.")
         return "chromium", "chromium", {}
     if name in BUNDLED:
         return name, name, {}
-    sys.exit(f"Unknown browser '{name}'. Options: auto, {', '.join(list(APPS) + list(BUNDLED))}")
+    sys.exit(f"Unknown browser '{name}'. Options: auto, {', '.join(list(apps) + list(BUNDLED))}")
 
 
 def ensure_browser(engine):
@@ -421,7 +445,6 @@ def cmd_gradecalc(a):
 
 # ------------------------------------------------------------------ Parent mode
 PARENT_PORT = 8766
-PARENT_LABEL = "com.stundl.ssc.parent"
 _PFAILS, _PCACHE = {}, {"t": 0.0, "v": ""}
 
 
@@ -441,9 +464,14 @@ def lan_hosts():
         sk.close()
     except Exception:
         pass
-    r = subprocess.run(["scutil", "--get", "LocalHostName"], capture_output=True, text=True) if sys.platform == "darwin" else None
-    if r and r.returncode == 0 and r.stdout.strip():
-        hosts.append(r.stdout.strip() + ".local")
+    if sys.platform == "darwin":
+        r = subprocess.run(["scutil", "--get", "LocalHostName"], capture_output=True, text=True)
+        if r.returncode == 0 and r.stdout.strip():
+            hosts.append(r.stdout.strip() + ".local")
+    else:
+        name = socket.gethostname().split(".")[0]
+        if name:
+            hosts.append(name if sys.platform.startswith("win") else name + ".local")
     return [h for h in dict.fromkeys(hosts) if h and not h.startswith("127.")]
 
 
@@ -461,7 +489,7 @@ def parent_running():
 
 
 def parent_status():
-    return dict(installed=core.plist_path(PARENT_LABEL).exists(), running=parent_running(), port=parent_port(),
+    return dict(installed=jobs.installed("parent"), running=parent_running(), port=parent_port(),
                 urls=parent_urls(), sections=core.parent_sections(), all_sections=list(core.PARENT_SECTIONS))
 
 
@@ -517,34 +545,13 @@ def make_parent_handler():
     return P
 
 
-def parent_plist():
-    return dict(Label=PARENT_LABEL, ProgramArguments=core.self_cmd("parent", "serve", "--port", str(parent_port())),
-                RunAtLoad=True, KeepAlive=dict(SuccessfulExit=False), LimitLoadToSessionType="Aqua",
-                WorkingDirectory=str(core.HOME), StandardOutPath=str(core.HOME / "parent.log"),
-                StandardErrorPath=str(core.HOME / "parent.log"))
-
-
-def _launchctl(*args):
-    return subprocess.run(["launchctl", *args], capture_output=True, text=True)
-
-
 def parent_install():
-    import plistlib
     core.parent_token()
-    pp = core.plist_path(PARENT_LABEL)
-    uid = subprocess.run(["id", "-u"], capture_output=True, text=True).stdout.strip()
-    core.HOME.mkdir(parents=True, exist_ok=True)
-    pp.parent.mkdir(parents=True, exist_ok=True)
-    pp.write_bytes(plistlib.dumps(parent_plist()))
-    _launchctl("bootout", f"gui/{uid}/{PARENT_LABEL}")
-    r = _launchctl("bootstrap", f"gui/{uid}", str(pp))
-    return r.returncode == 0, r.stderr
+    return jobs.install_service("parent", ("parent", "serve", "--port", str(parent_port())))
 
 
 def parent_remove():
-    uid = subprocess.run(["id", "-u"], capture_output=True, text=True).stdout.strip()
-    _launchctl("bootout", f"gui/{uid}/{PARENT_LABEL}")
-    core.plist_path(PARENT_LABEL).unlink(missing_ok=True)
+    jobs.remove("parent")
 
 
 def cmd_parent(a):
@@ -570,10 +577,10 @@ def cmd_parent(a):
             print("  browser:", u["browser"]); print("  wall:   ", u["wall"])
     elif a.action == "install":
         ok, err = parent_install()
-        print("Parent mode installed: it starts at login and keeps running." if ok else "launchctl failed: " + err)
+        print("Parent mode installed: it starts at login and keeps running." if ok else "Could not install the background job: " + err)
         for u in parent_urls():
             print("  browser:", u["browser"]); print("  wall:   ", u["wall"])
-        print("macOS may ask once whether to allow incoming connections - choose Allow.")
+        print("Your firewall may ask once whether to allow incoming connections - choose Allow (private network).")
         print("Tip: the page shows what this Mac last synced, so also run `schedule install` to keep it fresh.")
     elif a.action == "remove":
         parent_remove(); print("Parent mode removed.")
@@ -591,62 +598,43 @@ def cmd_parent(a):
 
 
 def cmd_widget(a):
+    if sys.platform != "darwin":
+        sys.exit("The WidgetKit widget is macOS-only.")
     f = core.write_widget(core.state())
     print("Wrote", f) if f else print("Widget not installed yet: build and run the host app in widget/, add the widget "
                                        "from the desktop gallery, then run this again.")
 
 
-def menubar_plist():
-    return dict(Label="com.stundl.ssc.menubar", ProgramArguments=core.self_cmd("menubar", "run"),
-                RunAtLoad=True, KeepAlive=dict(SuccessfulExit=False),  # restart after a crash, stay quit after "Quit"
-                LimitLoadToSessionType="Aqua", ProcessType="Interactive", WorkingDirectory=str(core.HOME),
-                StandardOutPath=str(core.HOME / "menubar.log"), StandardErrorPath=str(core.HOME / "menubar.log"))
-
-
 def cmd_menubar(a):
-    import plistlib
-    pl = menubar_plist()
-    pp = core.plist_path(pl["Label"])
-    uid = subprocess.run(["id", "-u"], capture_output=True, text=True).stdout.strip()
+    """macOS menu bar app, or the tray icon on Windows / Linux."""
     if a.action == "run":
-        return __import__("menubar").run()
-    subprocess.run(["launchctl", "bootout", f"gui/{uid}/{pl['Label']}"], capture_output=True)
+        if sys.platform == "darwin":
+            return __import__("menubar").run()
+        return __import__("tray").run()
     if a.action == "install":
-        core.HOME.mkdir(parents=True, exist_ok=True)
-        pp.parent.mkdir(parents=True, exist_ok=True)
-        pp.write_bytes(plistlib.dumps(pl))
-        r = subprocess.run(["launchctl", "bootstrap", f"gui/{uid}", str(pp)], capture_output=True, text=True)
-        print("Menu bar icon installed: it starts at login and stays running." if r.returncode == 0
-              else "launchctl failed: " + r.stderr)
+        ok, err = jobs.install_service("menubar", ("menubar", "run"))
+        print("Menu bar / tray icon installed: it starts at login." if ok else "Could not install: " + err)
     elif a.action == "remove":
-        pp.unlink(missing_ok=True)
-        print("Menu bar icon removed.")
+        jobs.remove("menubar")
+        print("Menu bar / tray icon removed.")
     else:
-        print("installed" if pp.exists() else "not installed", pp)
+        print("installed" if jobs.installed("menubar") else "not installed")
 
 
 def cmd_schedule(a):
-    import plistlib
-    uid = subprocess.run(["id", "-u"], capture_output=True, text=True).stdout.strip()
-    jobs = [(core.LAUNCHD_LABEL, a.time, ("sync", "--notify")),
-            (core.LAUNCHD_LABEL.replace("sync", "remind"), a.remind_time, ("remind",))]
-    for label, at, args in jobs:
-        pp = core.plist_path(label)
+    plan = [("sync", a.time, ("sync", "--notify")), ("remind", a.remind_time, ("remind",))]
+    for name, at, args in plan:
         if a.action == "install":
             h, m = (int(x) for x in at.split(":"))
-            pp.parent.mkdir(parents=True, exist_ok=True)
-            pp.write_bytes(plistlib.dumps(core.launchd_plist(h, m, args, label)))
-            subprocess.run(["launchctl", "bootout", f"gui/{uid}", str(pp)], capture_output=True)
-            r = subprocess.run(["launchctl", "bootstrap", f"gui/{uid}", str(pp)], capture_output=True, text=True)
-            print(f"{args[0]} scheduled daily at {at}." if r.returncode == 0 else "launchctl failed: " + r.stderr)
+            ok, err = jobs.install_daily(name, args, h, m)
+            print(f"{args[0]} scheduled daily at {at}." if ok else f"Could not schedule {args[0]}: {err}")
         elif a.action == "remove":
-            subprocess.run(["launchctl", "bootout", f"gui/{uid}", str(pp)], capture_output=True)
-            pp.unlink(missing_ok=True)
+            jobs.remove(name)
             print(f"{args[0]} schedule removed.")
         else:
-            print(args[0], "installed" if pp.exists() else "not installed")
+            print(args[0], "installed" if jobs.installed(name) else "not installed")
     if a.action == "install":
-        print("Log:", core.HOME / "sync.log")
+        print("Log folder:", core.HOME)
 
 
 # ------------------------------------------------------------------ GUI / web server
@@ -874,7 +862,9 @@ def cmd_gui(a):
     url = gui_url(srv)
     try:
         import webview
-        try:  # transparent window + system vibrancy behind the glass-styled page (macOS)
+        try:  # macOS: transparent window with system vibrancy behind the glass-styled page
+            if sys.platform != "darwin":
+                raise TypeError
             webview.create_window(core.APP_NAME, url + "&native", width=1100, height=760, transparent=True, vibrancy=True)
         except TypeError:
             webview.create_window(core.APP_NAME, url, width=1100, height=760)
@@ -933,8 +923,9 @@ def main():
     x = sp.add_parser("grade-calc"); x.add_argument("subject"); x.add_argument("--add", default="")
     x.add_argument("--target", type=float); x.set_defaults(f=cmd_gradecalc)
     sp.add_parser("widget").set_defaults(f=cmd_widget)
-    if len(sys.argv) == 1 or sys.argv[1].startswith("-psn"):  # double-clicked .app: open the GUI
-        sys.argv = [sys.argv[0], "gui"]
+    if len(sys.argv) == 1 or sys.argv[1].startswith("-psn"):  # double-clicked app: GUI - or the terminal view on a Linux box without a display
+        no_display = sys.platform.startswith("linux") and not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
+        sys.argv = [sys.argv[0], "tui" if no_display else "gui"]
     a = ap.parse_args()
     try:
         a.f(a)

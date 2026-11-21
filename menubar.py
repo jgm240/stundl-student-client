@@ -16,32 +16,7 @@ def icon_path():
     return None
 
 
-def due_label(h):
-    d = h.get("days_left")
-    if d is None:
-        return h["due"][5:]
-    if d == 0:
-        return "today"
-    if d == 1:
-        return "tomorrow"
-    if d > 1:
-        return f"in {d} d"
-    return f"{-d} d overdue"
-
-
-def title_badge(sm):
-    """' · 📚2!' = 2 homework items missed or due soon ('!' when any is already missed). Empty when all is well."""
-    hot = sm["missed"] + sm["soon"]
-    return f" · 📚{hot}{'!' if sm['missed'] else ''}" if hot else ""
-
-
-def homework_label(h):
-    return (("! " if h["status"] == "missed" else "") + f"{due_label(h)} · {h['subject']}: {h['text']}")[:64]
-
-
-def homework_header(sm):
-    parts = [f"{sm[k]} {lbl}" for k, lbl in (("missed", "missed"), ("soon", "due soon"), ("pending", "pending")) if sm[k]]
-    return "Homework: " + " · ".join(parts) if parts else "Homework: all done 🎉"
+from menu_model import due_label, homework_header, homework_label, title_badge  # noqa: E402
 
 
 class SSCBar(rumps.App):

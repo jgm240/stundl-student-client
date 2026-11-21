@@ -1,6 +1,9 @@
 playwright>=1.45
 textual>=0.60
-pywebview>=5; sys_platform == "darwin"
-rumps>=0.4; sys_platform == "darwin"
 segno>=1.6
 keyring>=24
+pywebview>=5; sys_platform != "linux"
+pywebview[qt]>=5; sys_platform == "linux"
+rumps>=0.4; sys_platform == "darwin"
+pystray>=0.19; sys_platform != "darwin"
+Pillow>=10; sys_platform != "darwin"

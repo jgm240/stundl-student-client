@@ -5,8 +5,11 @@ program has to ask you first. If the Keychain is unavailable the secret is NOT w
 sign in again. SSC never stores a password at all - you sign in in a browser window.
 """
 import hashlib
+import sys
 
 import core
+
+CHUNK = 500   # Windows Credential Manager entries are limited to ~1280 characters: bigger secrets are split
 
 
 class VaultError(Exception):
@@ -19,11 +22,61 @@ def _service():
 
 
 def _keyring():
+    """The OS secret store: macOS Keychain, Windows Credential Manager, or the Linux Secret Service
+    (GNOME Keyring / KWallet / KeePassXC). Backends are imported directly (no auto-discovery: works in packaged apps)."""
     try:
-        from keyring.backends.macOS import Keyring  # used directly: no backend auto-discovery needed (works in the packaged app)
-        return Keyring()
+        if sys.platform == "darwin":
+            from keyring.backends.macOS import Keyring
+        elif sys.platform.startswith("win"):
+            from keyring.backends.Windows import WinVaultKeyring as Keyring
+        else:
+            from keyring.backends.SecretService import Keyring
+        kr = Keyring()
+        if getattr(kr, "priority", 1) <= 0:
+            raise VaultError("no secure keyring is available on this system "
+                             "(Linux: install and unlock gnome-keyring, KWallet or KeePassXC with Secret Service)")
+        return kr
+    except VaultError:
+        raise
     except Exception as e:
-        raise VaultError(f"Keychain not available: {e}")
+        raise VaultError(f"secret store not available: {e}")
+
+
+def _put(kr, service, name, value):
+    if sys.platform == "darwin" or len(value) <= CHUNK:
+        kr.set_password(service, name, value)
+        return
+    parts = [value[i:i + CHUNK] for i in range(0, len(value), CHUNK)]
+    for i, part in enumerate(parts):
+        kr.set_password(service, f"{name}#{i}", part)
+    kr.set_password(service, name, f"ssc-chunks:{len(parts)}")
+
+
+def _pull(kr, service, name):
+    v = kr.get_password(service, name)
+    if v and v.startswith("ssc-chunks:"):
+        n = int(v.split(":")[1])
+        parts = [kr.get_password(service, f"{name}#{i}") for i in range(n)]
+        return None if any(p is None for p in parts) else "".join(parts)
+    return v
+
+
+def _drop(kr, service, name):
+    v = None
+    try:
+        v = kr.get_password(service, name)
+    except Exception:
+        pass
+    if v and v.startswith("ssc-chunks:"):
+        for i in range(int(v.split(":")[1])):
+            try:
+                kr.delete_password(service, f"{name}#{i}")
+            except Exception:
+                pass
+    try:
+        kr.delete_password(service, name)
+    except Exception:
+        pass
 
 
 def migrate_from(old_home, names=("parent-token", "webuntis-cookies")):
@@ -31,35 +84,31 @@ def migrate_from(old_home, names=("parent-token", "webuntis-cookies")):
     old_service = "com.stundl.ssc:" + hashlib.sha1(str(old_home).encode()).hexdigest()[:10]
     kr = _keyring()
     for n in names:
-        v = kr.get_password(old_service, n)
+        v = _pull(kr, old_service, n)
         if v:
-            kr.set_password(_service(), n, v)
-            try:
-                kr.delete_password(old_service, n)
-            except Exception:
-                pass
+            _put(kr, _service(), n, v)
+            _drop(kr, old_service, n)
 
 
 def get(name):
     try:
-        return _keyring().get_password(_service(), name)
-    except VaultError:
-        return None
+        return _pull(_keyring(), _service(), name)
     except Exception:
         return None
 
 
 def set(name, value):
     try:
-        _keyring().set_password(_service(), name, value)
+        _drop(_keyring(), _service(), name)   # clear any older, differently-chunked value first
+        _put(_keyring(), _service(), name, value)
     except VaultError:
         raise
     except Exception as e:
-        raise VaultError(f"Could not save to the Keychain: {e}")
+        raise VaultError(f"Could not save to the secret store: {e}")
 
 
 def delete(name):
     try:
-        _keyring().delete_password(_service(), name)
+        _drop(_keyring(), _service(), name)
     except Exception:
         pass

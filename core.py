@@ -6,12 +6,32 @@ import csv, hashlib, html, io, json, os, secrets, shutil, urllib.parse, plistlib
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
-HOME = Path(os.environ["SSC_DATA_DIR"]) if os.environ.get("SSC_DATA_DIR") else Path.home() / ".ssc"   # SSC_DATA_DIR: for tests; the real $HOME must stay untouched (the Keychain lives there)
+def data_dir():
+    """macOS ~/.ssc | Windows %LOCALAPPDATA%\\SSC | Linux $XDG_DATA_HOME/ssc (default ~/.local/share/ssc).
+    SSC_DATA_DIR overrides it (tests); the real home must stay untouched because the Keychain lives there."""
+    if os.environ.get("SSC_DATA_DIR"):
+        return Path(os.environ["SSC_DATA_DIR"])
+    if sys.platform == "darwin":
+        return Path.home() / ".ssc"
+    if sys.platform.startswith("win"):
+        return Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local") / "SSC"
+    return Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share") / "ssc"
+
+
+def playwright_cache():
+    """Where Playwright keeps downloaded browsers (the packaged app must look here, not inside its bundle)."""
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Caches" / "ms-playwright"
+    if sys.platform.startswith("win"):
+        return Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local") / "ms-playwright"
+    return Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "ms-playwright"
+
+
+HOME = data_dir()
 DB = HOME / "data.db"
 APP_NAME = "Stundl Student Client"          # official name
 APP_SHORT = "SSC"
 APP_NAME_EN = "SSC Student Client"           # what English speakers can call it
-LAUNCHD_LABEL = "com.stundl.ssc.sync"
 FROZEN = bool(getattr(sys, "frozen", False))                      # running inside the packaged .app
 APPDIR = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))  # where index.html lives
 
@@ -99,10 +119,10 @@ def wipe_browser_profiles():
 
 
 def migrate_legacy_home():
-    """One time, for installs from before the rename: move ~/.offlineuntis to ~/.ssc (the Keychain items are tied to the
+    """One time, macOS installs from before the rename: move ~/.offlineuntis to ~/.ssc (the Keychain items are tied to the
     folder path, so they are moved too) and remove the old background jobs (re-create them with `parent install`,
     `menubar install`, `schedule install`)."""
-    if os.environ.get("SSC_DATA_DIR"):
+    if sys.platform != "darwin" or os.environ.get("SSC_DATA_DIR"):
         return
     old = Path.home() / ".offlineuntis"
     if old.exists() and not HOME.exists():
@@ -112,11 +132,8 @@ def migrate_legacy_home():
             vault.migrate_from(old)
         except Exception:
             pass  # secrets stay readable under the old name; the app will ask you to sign in again if needed
-    for label in ("sync", "remind", "menubar", "parent"):
-        plist = Path.home() / "Library" / "LaunchAgents" / f"com.offlineuntis.{label}.plist"
-        if plist.exists():
-            subprocess.run(["launchctl", "bootout", f"gui/{os.getuid()}/com.offlineuntis.{label}"], capture_output=True)
-            plist.unlink(missing_ok=True)
+    import jobs
+    jobs.remove_legacy()
 
 
 def scrub_teams(con):
@@ -846,6 +863,8 @@ def write_snapshot(template):
 
 
 def icloud_dir():
+    if sys.platform != "darwin":
+        return None
     base = Path.home() / "Library" / "Mobile Documents" / "com~apple~CloudDocs"
     return base / "Stundl Student Client" if base.exists() else None
 
@@ -860,6 +879,8 @@ def widget_dir():
 
 
 def write_widget(st, cfg=None):
+    if sys.platform != "darwin":  # the WidgetKit widget is macOS-only
+        return None
     d = widget_dir()
     if not d.parents[2].exists():  # widget not installed yet
         return None
@@ -894,19 +915,22 @@ def render_static(st):
 
 # ------------------------------------------------------------------ scheduling / notifications
 def notify(title, msg):
-    if sys.platform != "darwin":
+    """Desktop notification: macOS notification centre, Windows balloon tip, Linux notify-send (else printed)."""
+    title, msg = str(title)[:100], str(msg)[:300]
+    try:
+        if sys.platform == "darwin":
+            esc = lambda t: t.replace("\\", "\\\\").replace('"', '\\"')
+            subprocess.run(["osascript", "-e", f'display notification "{esc(msg)}" with title "{esc(title)}"'], check=False)
+        elif sys.platform.startswith("win"):
+            script = ("Add-Type -AssemblyName System.Windows.Forms; $n = New-Object System.Windows.Forms.NotifyIcon; "
+                      "$n.Icon = [System.Drawing.SystemIcons]::Information; $n.Visible = $true; "
+                      "$n.ShowBalloonTip(8000, $env:SSC_T, $env:SSC_M, [System.Windows.Forms.ToolTipIcon]::Info); "
+                      "Start-Sleep -Seconds 9; $n.Dispose()")   # text goes through environment variables: no quoting problems
+            subprocess.Popen(["powershell", "-NoProfile", "-WindowStyle", "Hidden", "-Command", script],
+                             env={**os.environ, "SSC_T": title, "SSC_M": msg}, creationflags=0x08000000)
+        elif shutil.which("notify-send"):
+            subprocess.run(["notify-send", "--app-name=SSC", title, msg], check=False)
+        else:
+            print(f"[{title}] {msg}")
+    except Exception:
         print(f"[{title}] {msg}")
-        return
-    esc = lambda s: str(s).replace("\\", "\\\\").replace('"', '\\"')
-    subprocess.run(["osascript", "-e", f'display notification "{esc(msg)}" with title "{esc(title)}"'], check=False)
-
-
-def launchd_plist(hour, minute, args=("sync", "--notify"), label=LAUNCHD_LABEL):
-    return dict(Label=label, ProgramArguments=self_cmd(*args),
-                StartCalendarInterval=dict(Hour=hour, Minute=minute),
-                StandardOutPath=str(HOME / "sync.log"), StandardErrorPath=str(HOME / "sync.log"),
-                WorkingDirectory=str(HOME))
-
-
-def plist_path(label=LAUNCHD_LABEL):
-    return Path.home() / "Library" / "LaunchAgents" / (label + ".plist")
