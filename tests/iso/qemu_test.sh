@@ -41,8 +41,8 @@ echo
 J() { python3 - "$@"; }
 # admin login -> admin role; wrong password refused; admin sees the panel, guests do not
 curl -fsS -c $W/jar -H 'Content-Type: application/json' -d "{\"name\":\"admin\",\"password\":\"$PW\"}" http://127.0.0.1:18080/api/login
-curl -fsS -b $W/jar http://127.0.0.1:18080/api/me | grep -q '"admin"'
-curl -fsS -b $W/jar http://127.0.0.1:18080/admin | grep -qi "admin"
+curl -fsS -b $W/jar -o $W/me.json http://127.0.0.1:18080/api/me; grep -q '"admin"' $W/me.json
+curl -fsS -b $W/jar -o $W/admin.html http://127.0.0.1:18080/admin; grep -qi "admin" $W/admin.html
 test "$(curl -s -o /dev/null -w '%{http_code}' -H 'Content-Type: application/json' -d '{"name":"admin","password":"nope-nope-nope"}' http://127.0.0.1:18080/api/login)" = 401
 test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18080/data.json)" = 401
 echo "WEB + AUTH OK"

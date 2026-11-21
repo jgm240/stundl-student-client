@@ -149,7 +149,10 @@ def install(ans, run, root=TARGET, efi=None, a=None):
     finally:
         step("Finishing")
         run(["sync"], check=False)
-        run(["umount", "-R", str(root)], check=False)
+        for m in ("dev", "proc", "sys", "run"):
+            run(["mount", "--make-rslave", str(root / m)], check=False)
+        if run(["umount", "-R", str(root)], check=False).returncode != 0:
+            run(["umount", "-R", "-l", str(root)], check=False)
     step("Done")
 
 
