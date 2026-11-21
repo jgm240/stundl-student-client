@@ -120,7 +120,7 @@ class LastSync(SSCEntity, SensorEntity):
     _attr_device_class = SensorDeviceClass.TIMESTAMP
     _attr_icon = "mdi:sync"
 
-    def __init__(self, c): super().__init__(c, "last_sync", "Last sync on the Mac")
+    def __init__(self, c): super().__init__(c, "last_sync", "Last data update")
 
     @property
     def native_value(self):
