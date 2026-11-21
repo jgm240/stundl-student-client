@@ -1,0 +1,108 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Admin – Stundl Student Client</title><meta name="color-scheme" content="light dark"><meta name="robots" content="noindex">
+<style>
+:root{--bg:#f3f5fb;--surface:#fff;--surface2:#eef1f8;--text:#131826;--muted:#667085;--line:#e3e7f0;--accent:#4f46e5;--on:#fff;--ok:#16a34a;--warn:#d97706;--bad:#dc2626;--side:#fff;--shadow:0 1px 2px rgba(16,24,40,.05),0 8px 22px rgba(16,24,40,.06)}
+@media(prefers-color-scheme:dark){:root{--bg:#0b0f17;--surface:#141a26;--surface2:#1b2332;--text:#eef1f8;--muted:#98a3b7;--line:#252f43;--accent:#8e90ff;--on:#0b0f17;--ok:#4ade80;--warn:#fbbf24;--bad:#f87171;--side:#0f1420;--shadow:0 10px 28px rgba(0,0,0,.35)}}
+*{box-sizing:border-box}body{margin:0;font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;color:var(--text);background:var(--bg)}
+#app{display:grid;grid-template-columns:230px 1fr;min-height:100vh}
+aside{background:var(--side);border-right:1px solid var(--line);padding:18px 12px;position:sticky;top:0;height:100vh}
+aside b{display:block;padding:4px 10px 14px;font-size:17px}aside small{color:var(--muted);font-weight:400;display:block}
+nav button{display:block;width:100%;text-align:left;border:0;background:transparent;color:var(--text);font:inherit;padding:9px 12px;border-radius:10px;cursor:pointer}
+nav button:hover{background:var(--surface2)}nav button.on{background:color-mix(in srgb,var(--accent) 14%,transparent);color:var(--accent);font-weight:650}
+aside .back{margin-top:14px;padding:0 10px;font-size:14px}aside a{color:var(--accent);text-decoration:none}
+main{padding:26px 32px 70px;max-width:980px}h1{margin:0 0 4px;font-size:26px;letter-spacing:-.02em}.sub{color:var(--muted);margin:0 0 22px}
+h2{font-size:12px;text-transform:uppercase;letter-spacing:.09em;color:var(--muted);margin:26px 2px 10px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px 18px;margin-bottom:12px;box-shadow:var(--shadow)}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:8px 0}label{font-size:13px;color:var(--muted);display:block;margin-bottom:4px}
+input,select,textarea{font:inherit;color:var(--text);background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:8px 12px;outline:none}
+input:focus,select:focus,textarea:focus{border-color:var(--accent)}input[type=checkbox]{width:18px;height:18px;accent-color:var(--accent)}
+button.b{font:inherit;font-weight:600;border:1px solid var(--line);background:var(--surface);color:var(--text);border-radius:10px;padding:8px 14px;cursor:pointer}
+button.p{background:var(--accent);color:var(--on);border-color:transparent}button.d{color:var(--bad)}
+table{width:100%;border-collapse:collapse}td,th{text-align:left;padding:9px 8px;border-bottom:1px solid var(--line);font-size:14px}th{color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.06em}
+.tag{font-size:11px;font-weight:700;padding:2px 9px;border-radius:99px;background:var(--surface2)}.tag.admin{background:color-mix(in srgb,var(--accent) 20%,transparent);color:var(--accent)}
+code{background:var(--surface2);padding:2px 7px;border-radius:6px;font-size:.92em;word-break:break-all}
+.msg{padding:10px 14px;border-radius:10px;margin:10px 0;font-size:14px;display:none}.msg.ok{display:block;background:color-mix(in srgb,var(--ok) 14%,transparent)}.msg.err{display:block;background:color-mix(in srgb,var(--bad) 14%,transparent);color:var(--bad)}
+.kv{display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid var(--line)}.kv:last-child{border:0}.kv span{color:var(--muted)}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}@media(max-width:900px){#app{display:block}aside{position:static;height:auto}main{padding:18px}.grid2{grid-template-columns:1fr}nav{display:flex;flex-wrap:wrap}nav button{width:auto}}
+</style></head><body>
+<div id="app"><aside><b>SSC Server<small id="ver"></small></b><nav id="nav"></nav><div class="back"><a href="/">← Back to the app</a><br><br><a href="#" onclick="logout()">Log out</a></div></aside>
+<main><div id="msg" class="msg"></div><div id="page">Loading…</div></main></div>
+<script>
+const $=s=>document.querySelector(s),esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const api=async(p,b)=>{const r=await fetch(p,b===undefined?{}:{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b)});let j={};try{j=await r.json()}catch(e){}
+  if(r.status===403||r.status===401){location.href="/";throw 0}if(!r.ok){throw new Error(j.error||("HTTP "+r.status))}return j};
+const say=(t,ok=true)=>{const m=$("#msg");m.className="msg "+(ok?"ok":"err");m.textContent=t;if(ok)setTimeout(()=>m.className="msg",5000)};
+const run=async(f,okmsg)=>{try{await f();if(okmsg)say(okmsg);await show(tab)}catch(e){if(e)say(e.message,false)}};
+let S=null,C=null,tab="Overview";const TABS=["Overview","Accounts","Network","Web & links","SSH","WebUntis","Activity"];
+const when=t=>t?new Date(t*1000).toLocaleString("en-GB"):"never";
+async function logout(){await api("/api/logout",{});location.href="/"}
+async function show(t){tab=t;[S,C]=await Promise.all([api("/api/admin/status"),api("/api/admin/config")]);
+  $("#ver").textContent="v"+S.version+" · up "+Math.round(S.uptime/60)+" min";
+  $("#nav").innerHTML=TABS.map(x=>`<button class="${x===t?"on":""}" onclick="show('${x}')">${x}</button>`).join("");
+  $("#page").innerHTML=await PAGES[t]()}
+const cfg=async(patch,msg)=>run(()=>api("/api/admin/config",patch),msg);
+const chk=(id,v)=>`<input type="checkbox" id="${id}" ${v?"checked":""}>`;
+const apply=()=>S.apply?`<div class="card"><b>Last system change:</b> ${esc(S.apply.ok?"applied":"problem")} · ${esc((S.apply.messages||[]).join("; "))}</div>`:"";
+const PAGES={
+Overview:()=>`<h1>Overview</h1><p class="sub">Everything about this server at a glance.</p>
+ <div class="card"><div class="kv"><span>Web address</span><b>${S.urls.map(u=>`<a href="${esc(u)}">${esc(u)}</a>`).join("<br>")||"-"}</b></div>
+ <div class="kv"><span>Hostname</span><b>${esc(S.hostname)}</b></div>
+ <div class="kv"><span>WebUntis</span><b>${esc(S.untis||"not connected")}</b></div>
+ <div class="kv"><span>Last data update</span><b>${when(S.synced_at)}</b></div>
+ <div class="kv"><span>Accounts</span><b>${S.accounts.length} (${S.accounts.filter(a=>a.role==="admin").length} admin)</b></div></div>
+ <div class="row"><button class="b p" onclick="run(()=>api('/api/admin/sync',{}),'Sync started')">Sync now</button></div>${apply()}
+ <h2>Wall-display links</h2><div class="card">${S.links.enabled?(S.links.urls.map(u=>`<div class="kv"><span>${esc(u.host)}</span><div><code>${esc(u.browser)}</code><br><code>${esc(u.wall)}</code></div></div>`).join("")||"<span class='sub'>No network address yet.</span>")
+ +`<div class="row"><button class="b" onclick="if(confirm('Create a new link? Displays using the old one stop working.'))run(()=>api('/api/admin/links/rotate',{}),'New link created')">New link</button>
+ <span class="sub">${S.links.long?"Long links required (64 characters).":"Standard links (32 characters)."}</span></div>`:"<span class='sub'>Link access is turned off (Web & links).</span>"}</div>`,
+Accounts:()=>`<h1>Accounts</h1><p class="sub"><b>Guest</b> and <b>user</b> accounts see the Parent view (each with its own set of sections). <b>Admins</b> get the full app and this panel.</p>
+ <div class="card"><table><tr><th>Name</th><th>Role</th><th>Last sign-in</th><th></th></tr>${S.accounts.map(a=>`<tr><td>${esc(a.name)} ${a.disabled?'<span class="tag">disabled</span>':""}</td>
+  <td><select onchange="run(()=>api('/api/admin/accounts/role',{name:'${esc(a.name)}',role:this.value}),'Role changed')">${["guest","user","admin"].map(r=>`<option ${r===a.role?"selected":""}>${r}</option>`).join("")}</select></td>
+  <td>${when(a.last_login)}</td><td style="text-align:right;white-space:nowrap"><button class="b" onclick="newpw('${esc(a.name)}')">Password</button>
+  <button class="b" onclick="run(()=>api('/api/admin/accounts/disable',{name:'${esc(a.name)}',disabled:${!a.disabled}}))">${a.disabled?"Enable":"Disable"}</button>
+  <button class="b d" onclick="if(confirm('Delete ${esc(a.name)}?'))run(()=>api('/api/admin/accounts/delete',{name:'${esc(a.name)}'}),'Deleted')">Delete</button></td></tr>`).join("")}</table></div>
+ <h2>Add an account</h2><div class="card"><div class="row"><input id="an" placeholder="name" autocomplete="off"><input id="ap" type="password" placeholder="password (min 8, admin 12)" autocomplete="new-password">
+  <select id="ar"><option>guest</option><option selected>user</option><option>admin</option></select><button class="b p" onclick="run(()=>api('/api/admin/accounts',{name:$('#an').value,password:$('#ap').value,role:$('#ar').value}),'Account created')">Add</button></div></div>
+ <h2>What each role sees</h2><div class="card grid2">${["guest","user"].map(r=>`<div><label>${r} sections</label>${["today","timetable","homework","exams","plan","changes","grades","absences"].map(x=>`<label style="display:inline-flex;gap:6px;margin-right:10px;color:var(--text)"><input type="checkbox" data-r="${r}" value="${x}" ${C.sections[r].includes(x)?"checked":""}>${x}</label>`).join("")}</div>`).join("")}
+  <div><button class="b p" onclick="saveSections()">Save</button></div></div>
+ <div class="row"><label style="display:inline-flex;gap:8px;align-items:center;color:var(--text)">${chk("gp",C.web.guest_passwordless)} Allow guests to enter without a password (a "Continue as guest" button)</label><button class="b" onclick="cfg({web:{guest_passwordless:$('#gp').checked}},'Saved')">Save</button></div>`,
+Network:()=>`<h1>Network</h1><p class="sub">Careful: a wrong static address can make this server unreachable. You can always fix it on the console with <code>ssconfig</code>.</p>${apply()}
+ <div class="card"><div class="row"><div><label>Hostname</label><input id="hn" value="${esc(C.network.hostname)}"></div>
+ <div><label>Addressing</label><select id="nm" onchange="$('#st').style.display=this.value==='static'?'block':'none'"><option value="dhcp" ${C.network.mode==="dhcp"?"selected":""}>Automatic (DHCP)</option><option value="static" ${C.network.mode==="static"?"selected":""}>Custom IP address</option></select></div>
+ <div><label>Interface</label><input id="if" value="${esc(C.network.interface)}" size="8"></div></div>
+ <div id="st" style="display:${C.network.mode==="static"?"block":"none"}"><div class="row"><div><label>IP address / prefix</label><input id="ad" placeholder="192.168.1.50/24" value="${esc(C.network.address)}"></div>
+ <div><label>Gateway</label><input id="gw" placeholder="192.168.1.1" value="${esc(C.network.gateway)}"></div><div><label>DNS servers</label><input id="dn" placeholder="1.1.1.1, 9.9.9.9" value="${esc(C.network.dns.join(", "))}"></div></div></div>
+ <div class="row"><button class="b p" onclick="saveNet()">Save and apply</button></div></div>
+ <h2>Current addresses</h2><div class="card">${S.addresses.map(a=>`<div class="kv"><span>${esc(a[0])}</span><b>${esc(a[1])}</b></div>`).join("")||"-"}</div>`,
+"Web & links":()=>`<h1>Web & links</h1><p class="sub">The web interface and the optional sign-in-free wall-display links.</p>${apply()}
+ <div class="card"><div class="row"><div><label>Web port</label><input id="wp" type="number" value="${C.web.port}" style="width:100px"></div><div><label>Listen on</label><input id="wb" value="${esc(C.web.bind)}" size="14"></div>
+ <div><label>Session length (hours)</label><input id="sh" type="number" value="${C.web.session_hours}" style="width:90px"></div></div>
+ <div class="row"><label style="display:inline-flex;gap:8px;align-items:center;color:var(--text)">${chk("hs",C.web.https)} HTTPS (needs the certificate made by <code>ssconfig web https on</code>)</label></div>
+ <div class="row"><label style="display:inline-flex;gap:8px;align-items:center;color:var(--text)">${chk("fw",C.firewall.enabled)} Firewall on (only the web, link and SSH ports are open)</label></div>
+ <div class="row"><button class="b p" onclick="saveWeb()">Save</button></div></div>
+ <h2>Wall-display links</h2><div class="card"><div class="row"><label style="display:inline-flex;gap:8px;align-items:center;color:var(--text)">${chk("le",C.links.enabled)} Allow links (no sign-in)</label>
+ <label style="display:inline-flex;gap:8px;align-items:center;color:var(--text)">${chk("ll",C.links.long)} Require long links (64 characters)</label>
+ <div><label>Link port</label><input id="lp" type="number" value="${C.links.port}" style="width:100px"></div><button class="b p" onclick="saveLinks()">Save</button></div></div>`,
+SSH:()=>`<h1>SSH</h1><p class="sub">Remote console access for administrators. Changes are checked with <code>sshd -t</code> before they are used.</p>${apply()}
+ <div class="card"><div class="row"><label style="display:inline-flex;gap:8px;align-items:center;color:var(--text)">${chk("se",C.ssh.enabled)} SSH enabled</label><div><label>Port</label><input id="sp" type="number" value="${C.ssh.port}" style="width:90px"></div></div>
+ <div class="row"><label style="display:inline-flex;gap:8px;align-items:center;color:var(--text)">${chk("sr",C.ssh.permit_root)} Allow the root user to log in</label>
+ <label style="display:inline-flex;gap:8px;align-items:center;color:var(--text)">${chk("spw",C.ssh.password_auth)} Allow password logins (turn off to require SSH keys)</label></div>
+ <div class="row"><div><label>Only these users may log in (blank = all)</label><input id="su" value="${esc(C.ssh.allow_users.join(" "))}" size="30" placeholder="admin ssc-admin"></div></div>
+ <div class="row"><button class="b p" onclick="saveSsh()">Save and apply</button></div></div>`,
+WebUntis:()=>`<h1>WebUntis</h1><p class="sub">The server logs in to WebUntis by itself with the <b>Untis Mobile</b> key (no browser, no password).</p>
+ <div class="card"><div class="kv"><span>Connected as</span><b>${esc(S.untis||"nobody yet")}</b></div><div class="kv"><span>Last update</span><b>${when(S.synced_at)}</b></div>
+ <div class="row"><div style="flex:1"><label>Untis Mobile QR text - WebUntis → Profile → Freigaben / Access → Untis Mobile → scan the QR code with a phone camera and paste the text (starts with untis://setschool?…)</label>
+ <input id="qr" style="width:100%" type="password" placeholder="untis://setschool?url=…" autocomplete="off"></div></div>
+ <div class="row"><button class="b p" onclick="run(()=>api('/api/admin/untis',{qr:$('#qr').value}).then(()=>$('#qr').value=''),'Key saved - syncing')">Save key</button>
+ <button class="b" onclick="run(()=>api('/api/admin/sync',{}),'Sync started')">Sync now</button>
+ ${S.untis?`<button class="b d" onclick="if(confirm('Remove the key?'))run(()=>api('/api/admin/untis/clear',{}),'Removed')">Remove key</button>`:""}</div>
+ <div class="row"><label style="display:inline-flex;gap:8px;align-items:center;color:var(--text)">Update every <input id="sm" type="number" value="${C.sync.minutes}" style="width:80px"> minutes</label><button class="b" onclick="cfg({sync:{minutes:+$('#sm').value}},'Saved')">Save</button></div>
+ <p class="sub">The key is stored in a file only the service account can read. Treat it like a password; generating a new QR code in WebUntis revokes it.</p></div>`,
+Activity:async()=>{const l=await api("/api/admin/audit");return `<h1>Activity</h1><p class="sub">Sign-ins and changes (newest first).</p><div class="card"><table><tr><th>When</th><th>Who</th><th>What</th><th>From</th></tr>${l.map(e=>`<tr><td>${when(e.at)}</td><td>${esc(e.who)}</td><td>${esc(e.event)} ${esc(e.detail)}</td><td>${esc(e.ip)}</td></tr>`).join("")}</table></div>`}};
+function newpw(n){const p=prompt("New password for "+n+":");if(p)run(()=>api("/api/admin/accounts/password",{name:n,password:p}),"Password changed")}
+function saveSections(){const g=r=>[...document.querySelectorAll(`input[data-r=${r}]:checked`)].map(i=>i.value);cfg({sections:{guest:g("guest"),user:g("user")}},"Saved")}
+function saveNet(){cfg({network:{hostname:$("#hn").value,mode:$("#nm").value,interface:$("#if").value,address:$("#ad")?$("#ad").value:"",gateway:$("#gw")?$("#gw").value:"",dns:($("#dn")?$("#dn").value:"")}},"Saved - applying…")}
+function saveWeb(){cfg({web:{port:+$("#wp").value,bind:$("#wb").value,session_hours:+$("#sh").value,https:$("#hs").checked},firewall:{enabled:$("#fw").checked}},"Saved - the service restarts")}
+function saveLinks(){cfg({links:{enabled:$("#le").checked,long:$("#ll").checked,port:+$("#lp").value}},"Saved")}
+function saveSsh(){cfg({ssh:{enabled:$("#se").checked,port:+$("#sp").value,permit_root:$("#sr").checked,password_auth:$("#spw").checked,allow_users:$("#su").value}},"Saved - applying…")}
+show("Overview").catch(()=>{});
+</script></body></html>

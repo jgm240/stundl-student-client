@@ -1,0 +1,18 @@
+[Unit]
+Description=SSC Server live console
+ConditionPathExists=/run/live/medium
+After=systemd-user-sessions.service plymouth-quit-wait.service getty@tty1.service
+Conflicts=getty@tty1.service
+Before=getty.target
+
+[Service]
+ExecStart=/usr/local/sbin/ssc-live-menu
+StandardInput=tty
+StandardOutput=tty
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

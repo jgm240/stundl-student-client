@@ -1,0 +1,15 @@
+#!/bin/sh
+set -e
+id ssc >/dev/null 2>&1 || useradd --system --home-dir /var/lib/ssc --shell /usr/sbin/nologin --user-group ssc
+install -d -o ssc -g ssc -m 750 /var/lib/ssc
+systemctl enable ssc-server.service ssc-apply.path ssc-banner.service ssc-sync.timer ssc-live-console.service ssc-autoinstall.service nftables.service ssh.service
+# the console of the live medium belongs to the SSC menu
+systemctl disable getty@tty1.service 2>/dev/null || true
+# fresh machine-id and host keys are made on first boot / by the installer
+rm -f /etc/ssh/ssh_host_* /etc/machine-id
+touch /etc/machine-id
+# sensible default: SSH on, root login off (the admin can change this with ssconfig)
+printf 'PermitRootLogin no\n' > /etc/ssh/sshd_config.d/ssc.conf
+# the interfaces file must include the file ssconfig writes
+grep -q 'interfaces.d' /etc/network/interfaces 2>/dev/null || echo 'source /etc/network/interfaces.d/*' >> /etc/network/interfaces
+# live medium: let the live user sudo without a password only on the live session (removed with live-config on install)

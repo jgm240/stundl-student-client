@@ -1,0 +1,8 @@
+[Unit]
+Description=Watch for SSC Server settings changes from the admin panel
+
+[Path]
+PathExists=/var/lib/ssc/apply/request.json
+
+[Install]
+WantedBy=multi-user.target

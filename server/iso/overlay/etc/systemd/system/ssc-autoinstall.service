@@ -1,0 +1,15 @@
+[Unit]
+Description=Unattended SSC Server installation (only when a disk labelled SSCANS is attached)
+ConditionPathExists=/run/live/medium
+ConditionPathExists=/dev/disk/by-label/SSCANS
+After=local-fs.target systemd-udev-settle.service
+Before=ssc-live-console.service
+
+[Service]
+Type=oneshot
+StandardOutput=journal+console
+StandardError=journal+console
+ExecStart=/usr/local/sbin/ssc-install --auto
+
+[Install]
+WantedBy=multi-user.target

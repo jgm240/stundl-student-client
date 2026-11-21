@@ -1,0 +1,40 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Sign in – Stundl Student Client</title><meta name="color-scheme" content="light dark"><meta name="robots" content="noindex">
+<style>
+:root{--bg:#f3f5fb;--card:#fff;--text:#131826;--muted:#667085;--line:#e3e7f0;--accent:#4f46e5;--bad:#dc2626}
+@media(prefers-color-scheme:dark){:root{--bg:#0b0f17;--card:#141a26;--text:#eef1f8;--muted:#98a3b7;--line:#252f43;--accent:#8e90ff;--bad:#f87171}}
+*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;font:16px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;color:var(--text);
+ background:radial-gradient(900px 500px at 80% -10%,rgba(79,70,229,.18),transparent),radial-gradient(700px 420px at -5% 105%,rgba(14,165,164,.18),transparent),var(--bg)}
+.card{width:min(400px,92vw);background:var(--card);border:1px solid var(--line);border-radius:22px;padding:30px;box-shadow:0 18px 50px rgba(20,28,80,.16)}
+.logo{width:54px;height:54px;border-radius:14px;background:linear-gradient(135deg,#0ea5a4,#3b3fd8);display:grid;place-items:center;margin-bottom:14px}
+.logo i{display:block;width:26px;height:26px;background:
+ linear-gradient(#fff,#fff) 0 0/7px 7px no-repeat,linear-gradient(#fff,#fff) 9.5px 0/7px 7px no-repeat,linear-gradient(#fff,#fff) 19px 0/7px 7px no-repeat,
+ linear-gradient(#fff,#fff) 0 9.5px/7px 7px no-repeat,linear-gradient(#ffc83d,#ffc83d) 9.5px 9.5px/7px 7px no-repeat,linear-gradient(#fff,#fff) 19px 9.5px/7px 7px no-repeat,
+ linear-gradient(#fff,#fff) 19px 19px/7px 7px no-repeat,linear-gradient(#fff,#fff) 0 19px/7px 7px no-repeat}
+h1{margin:0 0 4px;font-size:24px;letter-spacing:-.02em}p{margin:0 0 20px;color:var(--muted);font-size:14.5px}
+label{display:block;font-size:13px;font-weight:600;margin:14px 0 6px}
+input{width:100%;font:inherit;padding:11px 14px;border-radius:12px;border:1px solid var(--line);background:var(--bg);color:var(--text);outline:none}
+input:focus{border-color:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 18%,transparent)}
+button{width:100%;margin-top:18px;font:inherit;font-weight:650;padding:12px;border-radius:12px;border:0;background:var(--accent);color:#fff;cursor:pointer}
+button.alt{background:transparent;color:var(--accent);border:1px solid var(--line);margin-top:10px}
+#err{color:var(--bad);font-size:14px;min-height:20px;margin-top:12px}#note{font-size:13.5px;color:var(--muted);margin-top:14px;display:none}
+</style></head><body>
+<form class="card" id="f" autocomplete="on">
+  <div class="logo"><i></i></div>
+  <h1>Stundl Student Client</h1><p>Sign in to see the school overview.</p>
+  <label for="n">Account</label><input id="n" name="username" autocomplete="username" autofocus required>
+  <label for="p">Password</label><input id="p" name="password" type="password" autocomplete="current-password" required>
+  <div id="err" role="alert"></div>
+  <button>Sign in</button>
+  <button type="button" class="alt" id="g" hidden>Continue as guest</button>
+  <div id="note"></div>
+</form>
+<script>
+const $=s=>document.querySelector(s);
+async function login(body){const r=await fetch("/api/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+  const j=await r.json();if(!r.ok){$("#err").textContent=j.error||"Sign-in failed";return}location.href="/"}
+$("#f").onsubmit=e=>{e.preventDefault();$("#err").textContent="";login({name:$("#n").value,password:$("#p").value})};
+$("#g").onclick=()=>login({guest:true});
+fetch("/api/login-info").then(r=>r.json()).then(i=>{if(i.guest)$("#g").hidden=false;
+  if(i.setup_needed){const n=$("#note");n.style.display="block";n.textContent="No administrator exists yet. On the server console run:  ssconfig  → Accounts → Add admin."}}).catch(()=>{});
+</script></body></html>

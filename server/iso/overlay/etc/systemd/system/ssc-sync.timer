@@ -1,0 +1,9 @@
+[Unit]
+Description=Fetch WebUntis data regularly
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=30min
+
+[Install]
+WantedBy=timers.target

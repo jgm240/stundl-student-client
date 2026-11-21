@@ -314,7 +314,55 @@ def _sync_school_body(a):
         core.notify(core.APP_SHORT, f"{len(changes)} change(s): " + "; ".join(t for _, t in changes[:3]))
 
 
+def _sync_direct(a):
+    import untis_direct
+    try:
+        changes, notes = untis_direct.sync()
+    except untis_direct.AuthError as e:
+        sys.exit(f"WebUntis refused the Untis Mobile login: {e}. Was the QR code regenerated, or is the clock wrong?")
+    except untis_direct.UntisError as e:
+        sys.exit(str(e))
+    except OSError as e:
+        sys.exit(f"Can't reach WebUntis ({e}) - keeping the stored data.")
+    print(f"Sync done. {len(changes)} change(s).")
+    for k, t in changes:
+        print("  *", t)
+    for n in notes:
+        print("  ! " + n)
+    core.write_snapshot(core.APPDIR / "index.html")
+
+
+def cmd_server(a):
+    sys.path.insert(0, str(Path(__file__).resolve().parent / "server"))
+    import serverapp
+    serverapp.run()
+
+
+def cmd_untis(a):
+    import untis_direct
+    if a.action == "set":
+        cfg = untis_direct.parse_qr(a.value or "")
+        if not cfg:
+            sys.exit("That isn't an Untis Mobile QR text (untis://setschool?url=...&school=...&user=...&key=...)")
+        untis_direct.save_credentials(cfg)
+        print("Saved:", untis_direct.describe())
+    elif a.action == "clear":
+        untis_direct.clear_credentials(); print("Removed.")
+    elif a.action == "test":
+        try:
+            untis_direct.call(untis_direct.load_credentials() or sys.exit("No key set."), "getUserData2017")
+            print("Login OK.")
+        except untis_direct.UntisError as e:
+            sys.exit(f"Login failed: {e}")
+        except OSError as e:
+            sys.exit(f"Can't reach WebUntis: {e}")
+    else:
+        print(untis_direct.describe() or "No Untis Mobile key set.")
+
+
 def cmd_sync(a):
+    if getattr(a, "direct", False) or str(core.config().get("sync_mode", "")) == "direct":
+        return _sync_direct(a)
     _sync_school(a)
 
 
@@ -532,7 +580,8 @@ def make_parent_handler():
                 return self.reply(429, "slow down")
             m = re.fullmatch(r"/p/([A-Za-z0-9_-]{20,64})(/|/wall/?|/data\.json)", urlparse(self.path).path)
             tok = core.parent_token_peek().encode()
-            if not m or not tok or not secrets.compare_digest(m.group(1).encode(), tok):
+            need_long = str(core.config().get("links_long", "")).lower() in ("1", "true", "yes", "on")
+            if not m or not tok or (need_long and len(tok) < 64) or not secrets.compare_digest(m.group(1).encode(), tok):
                 _PFAILS[ip].append(now)
                 return self.reply(404, "not found")
             if m.group(2) == "/data.json":
@@ -656,7 +705,10 @@ def run_bg(state, cmd):
 
 
 def run_sync_bg():
-    run_bg(SYNC, core.self_cmd("sync", "--notify", "--interactive"))
+    if str(core.config().get("sync_mode", "")) == "direct":
+        run_bg(SYNC, core.self_cmd("sync", "--direct"))
+    else:
+        run_bg(SYNC, core.self_cmd("sync", "--notify", "--interactive"))
 
 
 def school_search(q):
@@ -890,8 +942,10 @@ def main():
     x.add_argument("--full", action="store_true", help="download the timetable for the whole school year")
     x.add_argument("--notify", action="store_true", help="macOS notification on changes / expired login")
     x.add_argument("--interactive", action="store_true", help="open a browser window if re-login fails")
+    x.add_argument("--direct", action="store_true", help="headless: log in with the Untis Mobile key (no browser) - used by SSC Server")
     x.set_defaults(f=cmd_sync)
     sp.add_parser("tui").set_defaults(f=lambda a: __import__("tui").run())
+    sp.add_parser("server", help="run SSC Server (web login, roles, Parent view)").set_defaults(f=cmd_server)
     for name, fn in (("serve", cmd_serve), ("gui", cmd_gui)):
         x = sp.add_parser(name); x.add_argument("--port", type=int, default=8765)
         x.add_argument("--no-sync", action="store_true", help="don't sync on launch"); x.set_defaults(f=fn)
@@ -908,6 +962,8 @@ def main():
     x = sp.add_parser("schedule"); x.add_argument("action", choices=["install", "remove", "status"])
     x.add_argument("--time", default="06:45", help="daily sync time")
     x.add_argument("--remind-time", default="17:30", help="daily reminder time"); x.set_defaults(f=cmd_schedule)
+    x = sp.add_parser("untis", help="the Untis Mobile key for headless syncing (SSC Server)")
+    x.add_argument("action", choices=["set", "test", "clear", "status"]); x.add_argument("value", nargs="?"); x.set_defaults(f=cmd_untis)
     x = sp.add_parser("plan", help="your study plan (shown in Parent mode)")
     x.add_argument("action", nargs="?", default="list", choices=["list", "add", "done", "undone", "edit", "rm"]); x.add_argument("arg", nargs="*")
     x.add_argument("--date"); x.add_argument("--time"); x.add_argument("--minutes", type=int); x.add_argument("--subject"); x.add_argument("--notes")

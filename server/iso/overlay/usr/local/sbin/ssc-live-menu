@@ -1,0 +1,19 @@
+#!/bin/sh
+# Shown on the console of the live medium.
+while true; do
+  C=$(whiptail --backtitle "SSC Server" --title "SSC Server $(cat /opt/ssc/VERSION 2>/dev/null)" --menu "\nInstall to disk, or try it right now from this medium." 18 70 6 \
+      install "Install SSC Server to disk" \
+      setup   "Set up this live session (admin account, network)" \
+      ip      "Show IP address" \
+      shell   "Command line" \
+      reboot  "Restart" \
+      off     "Power off" 3>&1 1>&2 2>&3) || C=shell
+  case "$C" in
+    install) ssc-install ;;
+    setup)   ssconfig first-boot; echo; read -r -p "Press Enter" _ ;;
+    ip)      ssconfig showip; echo; read -r -p "Press Enter" _ ;;
+    shell)   echo "Type 'exit' to return to the menu."; /bin/bash -l ;;
+    reboot)  systemctl reboot ;;
+    off)     systemctl poweroff ;;
+  esac
+done

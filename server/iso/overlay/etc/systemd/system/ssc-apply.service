@@ -1,0 +1,7 @@
+[Unit]
+Description=Apply SSC Server settings (network, SSH, firewall)
+
+[Service]
+Type=oneshot
+Environment=SSC_DATA_DIR=/var/lib/ssc SSC_VAULT=file
+ExecStart=/usr/bin/python3 /opt/ssc/server/ssconfig.py process-request

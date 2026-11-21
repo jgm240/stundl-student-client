@@ -1,0 +1,20 @@
+[Unit]
+Description=SSC Server (web login, roles, Parent view)
+After=network.target
+
+[Service]
+User=ssc
+Group=ssc
+Environment=SSC_DATA_DIR=/var/lib/ssc SSC_VAULT=file PYTHONUNBUFFERED=1
+ExecStart=/usr/bin/python3 /opt/ssc/ssc.py server
+Restart=always
+RestartSec=3
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/ssc
+
+[Install]
+WantedBy=multi-user.target

@@ -90,7 +90,40 @@ def migrate_from(old_home, names=("parent-token", "webuntis-cookies")):
             _drop(kr, old_service, n)
 
 
+# --- server edition: no desktop keyring on a headless box. SSC_VAULT=file keeps secrets in one file that only the
+# service account can read (0600). Anyone with root on the machine can read it - that is the trade-off of a server.
+def _file_vault():
+    import json, os
+    return core.HOME / "secrets.json", json, os
+
+
+def _file_read():
+    f, json, _ = _file_vault()
+    try:
+        return json.loads(f.read_text())
+    except Exception:
+        return {}
+
+
+def _file_write(d):
+    f, json, os = _file_vault()
+    f.parent.mkdir(parents=True, exist_ok=True)
+    tmp = f.with_suffix(".tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as fh:
+        fh.write(json.dumps(d))
+    os.replace(tmp, f)
+    f.chmod(0o600)
+
+
+def _use_file():
+    import os
+    return os.environ.get("SSC_VAULT") == "file"
+
+
 def get(name):
+    if _use_file():
+        return _file_read().get(name)
     try:
         return _pull(_keyring(), _service(), name)
     except Exception:
@@ -98,6 +131,11 @@ def get(name):
 
 
 def set(name, value):
+    if _use_file():
+        d = _file_read()
+        d[name] = value
+        _file_write(d)
+        return
     try:
         _drop(_keyring(), _service(), name)   # clear any older, differently-chunked value first
         _put(_keyring(), _service(), name, value)
@@ -108,6 +146,11 @@ def set(name, value):
 
 
 def delete(name):
+    if _use_file():
+        d = _file_read()
+        d.pop(name, None)
+        _file_write(d)
+        return
     try:
         _drop(_keyring(), _service(), name)
     except Exception:

@@ -1,0 +1,9 @@
+[Unit]
+Description=Fetch WebUntis data
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=ssc
+Environment=SSC_DATA_DIR=/var/lib/ssc SSC_VAULT=file
+ExecStart=/usr/bin/python3 /opt/ssc/ssc.py sync --direct

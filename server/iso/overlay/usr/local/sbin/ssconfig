@@ -1,0 +1,5 @@
+#!/bin/sh
+# ssconfig needs root (it writes system files). Normal users get sudo automatically.
+[ "$(id -u)" = 0 ] || exec sudo -- "$0" "$@"
+export SSC_DATA_DIR=/var/lib/ssc SSC_VAULT=file
+exec /usr/bin/python3 /opt/ssc/server/ssconfig.py "$@"

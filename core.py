@@ -180,6 +180,15 @@ def load(con=None):
     return {k: (t, json.loads(b)) for k, t, b in con.execute("select key, fetched_at, body from store")}
 
 
+def store_save(con, key, data, changes):
+    """Store a fetched document; if an older version exists, add the human-readable differences to `changes`."""
+    old = con.execute("select body from store where key=?", (key,)).fetchone()
+    if old:
+        changes.extend(diff(key, json.loads(old[0]), data))
+    con.execute("insert or replace into store values(?,?,?)", (key, time.time(), json.dumps(data)))
+    con.commit()
+
+
 def record_changes(con, changes):
     now = time.time()
     con.executemany("insert into changes(at, kind, text) values(?,?,?)", [(now, k, t) for k, t in changes])
@@ -467,9 +476,12 @@ def parent_token(rotate=False):
     """The secret in the Parent link (kept in the Keychain, not in a file). Anyone with the link can see the Parent
     view - nothing else."""
     import vault
+    long_links = str(config().get("links_long", "")).lower() in ("1", "true", "yes", "on")
     tok = None if rotate else vault.get("parent-token")
+    if tok and long_links and len(tok) < 64:   # "require long link": replace a short link by a long one
+        tok = None
     if not tok:
-        tok = secrets.token_urlsafe(24)
+        tok = secrets.token_urlsafe(48 if long_links else 24)
         vault.set("parent-token", tok)
     _TOK["t"] = 0.0
     return tok
@@ -492,11 +504,11 @@ def parent_sections():
     return [x for x in PARENT_SECTIONS if x in chosen]
 
 
-def parent_state(con=None):
+def parent_state(con=None, sections=None):
     """What the Parent website may show. Built field by field from an allow-list: it never contains WebUntis
     messages, sign-in data, settings or anything that can change data."""
     st = state(con)
-    secs = parent_sections()
+    secs = [x for x in PARENT_SECTIONS if x in sections] if sections else parent_sections()
     out = dict(synced_at=st["synced_at"], server_time=time.time(), sections=secs)
     if "timetable" in secs or "today" in secs:
         out["timetable"] = {wk: [dict(date=e["date"], start=e["start"], end=e["end"], subject=e["subject"], teacher=e["teacher"],

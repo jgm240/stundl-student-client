@@ -1,0 +1,72 @@
+name: Build SSC Server ISO
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version label for the file names"
+        default: "1.0.0-beta.2"
+  push:
+    paths: ["server/**", "tests/test_server.py", "tests/iso/**", ".github/workflows/server-iso.yml", "untis_direct.py"]
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - run: python -m unittest tests.test_server -v
+
+  iso:
+    needs: unit
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, i386]
+    container:
+      image: debian:bookworm
+      options: --privileged
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install live-build
+        run: |
+          apt-get update
+          apt-get install -y live-build debootstrap squashfs-tools xorriso syslinux syslinux-common isolinux grub-pc-bin grub-efi-amd64-bin mtools dosfstools git ca-certificates
+      - name: Build ISO
+        env:
+          VERSION: ${{ github.event.inputs.version || 'dev' }}
+        run: server/iso/build.sh ${{ matrix.arch }} "$VERSION"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ssc-server-${{ matrix.arch }}
+          path: dist/ssc-server-*
+          retention-days: 14
+
+  test:
+    needs: iso
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, i386]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: ssc-server-${{ matrix.arch }}
+          path: iso
+      - name: Install QEMU
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-x86 qemu-utils e2fsprogs ovmf
+          sudo chmod 666 /dev/kvm || true
+      - name: Live boot
+        run: tests/iso/qemu_test.sh live "$(ls iso/*.iso)" ${{ matrix.arch }}
+      - name: Install to disk (BIOS) and boot it
+        run: tests/iso/qemu_test.sh install "$(ls iso/*.iso)" ${{ matrix.arch }}
+      - name: Install to disk (UEFI, 64-bit only)
+        if: matrix.arch == 'amd64'
+        continue-on-error: true
+        run: UEFI=1 tests/iso/qemu_test.sh install "$(ls iso/*.iso)" amd64

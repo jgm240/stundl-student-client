@@ -1,0 +1,13 @@
+[Unit]
+Description=Show the SSC Server address at the login prompt
+After=network-online.target ssc-apply.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+Environment=SSC_DATA_DIR=/var/lib/ssc SSC_VAULT=file
+ExecStart=/bin/sh -c 'sleep 4; /usr/bin/python3 /opt/ssc/server/ssconfig.py banner; for t in /dev/tty1; do /sbin/agetty --reload 2>/dev/null || true; done'
+
+[Install]
+WantedBy=multi-user.target
