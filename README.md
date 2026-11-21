@@ -1,6 +1,6 @@
 # Stundl Student Client (SSC)
 
-English speakers can call it **SSC Student Client** (it’s hard to pronunce in English)
+English speakers can call it **SSC Student Client** (the word Stundl is hard to pronunce in English)
 
 An unofficial, independent macOS app that downloads your own WebUntis data (timetable, homework, exams, grades,
 absences) so you can use it offline: GUI, terminal view, menu bar widget, a read-only "Parent mode" website for
