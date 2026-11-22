@@ -44,6 +44,7 @@ cd "$WORK"
 cp "$HERE/hooks/"* config/hooks/normal/
 
 lb build 2>&1 | tail -n 200
+ls -l binary/live/initrd.img* 2>/dev/null || true
 ISO=$(ls ./*.iso | head -1)
 OUT="${OUT:-$REPO/dist}"; mkdir -p "$OUT"
 cp "$ISO" "$OUT/ssc-server-$VERSION-$ARCH.iso"

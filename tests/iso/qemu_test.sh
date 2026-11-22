@@ -27,11 +27,12 @@ echo "== $MODE $ARCH ($Q $ACCEL)"
 
 if [ "$MODE" = live ]; then
   BIOSARG=""; [ "${UEFI:-0}" = 1 ] && BIOSARG="-bios /usr/share/ovmf/OVMF.fd"
-  timeout $((420*SLOW)) $Q $ACCEL -m 1024 $BIOSARG -cdrom "$ISO" -boot d -monitor unix:$W/mon.sock,server,nowait -serial file:$W/serial.log -display none -no-reboot \
+  timeout $((420*SLOW)) $Q $ACCEL -m 512 $BIOSARG -cdrom "$ISO" -boot d -monitor unix:$W/mon.sock,server,nowait -serial file:$W/serial.log -display none -no-reboot \
      -netdev user,id=n0 -device virtio-net-pci,netdev=n0 &
   for i in $(seq 1 $((100*SLOW))); do grep -q "SSC Server" "$W/serial.log" 2>/dev/null && grep -q "login:" "$W/serial.log" 2>/dev/null && break; sleep 4; done
   tail -n 30 "$W/serial.log" || true
   grep -q "login:" "$W/serial.log" || { echo "LIVE BOOT FAILED"; exit 1; }
+  if grep -qi "unpacking failed\|Kernel panic\|Failed to load initrd" "$W/serial.log"; then echo "LIVE BOOT HAD INITRAMFS/PANIC ERRORS"; grep -i "unpacking failed\|panic\|initrd" "$W/serial.log" | head; exit 1; fi
   echo "LIVE BOOT OK"
   if [ "${UEFI:-0}" = 1 ]; then exit 0; fi       # UEFI: the boot menu stays on screen, so a screenshot proves nothing here
   sleep 15; screen_check "$W" && echo "LIVE CONSOLE SHOWS TEXT OK"; exit $?
@@ -45,14 +46,14 @@ J
 truncate -s 16M $W/ans.img; mkfs.ext4 -q -F -L SSCANS -d $W/ans $W/ans.img
 BIOSARG=""; [ "${UEFI:-0}" = 1 ] && BIOSARG="-bios /usr/share/ovmf/OVMF.fd"
 echo "== phase 1: install"
-timeout $((1500*SLOW)) $Q $ACCEL -m 1536 $BIOSARG -cdrom "$ISO" -boot d -drive file=$W/disk.qcow2,if=virtio,format=qcow2 \
+timeout $((1500*SLOW)) $Q $ACCEL -m 1024 $BIOSARG -cdrom "$ISO" -boot d -drive file=$W/disk.qcow2,if=virtio,format=qcow2 \
    -drive file=$W/ans.img,if=virtio,format=raw -monitor none -serial file:$W/install.log -display none -no-reboot \
    -netdev user,id=n0 -device virtio-net-pci,netdev=n0 || true
 tail -n 40 $W/install.log
 grep -q "SSC-INSTALL-OK" $W/install.log || echo "note: install marker not seen (the boot test below decides)"
 grep -q "INSTALL FAILED\|Traceback" $W/install.log && { echo "INSTALL FAILED"; exit 1; }
 echo "== phase 2: boot the installed system"
-$Q $ACCEL -m 1024 $BIOSARG -drive file=$W/disk.qcow2,if=virtio,format=qcow2 -monitor unix:$W/mon.sock,server,nowait -serial file:$W/boot.log -display none \
+$Q $ACCEL -m 512 $BIOSARG -drive file=$W/disk.qcow2,if=virtio,format=qcow2 -monitor unix:$W/mon.sock,server,nowait -serial file:$W/boot.log -display none \
    -netdev user,id=n0,hostfwd=tcp:127.0.0.1:18080-:8080,hostfwd=tcp:127.0.0.1:18766-:8766 -device virtio-net-pci,netdev=n0 &
 for i in $(seq 1 $((90*SLOW))); do curl -fs http://127.0.0.1:18080/health >/dev/null 2>&1 && break; sleep 4; done
 curl -fs http://127.0.0.1:18080/health || { tail -n 60 $W/boot.log; echo "SERVER NOT UP"; exit 1; }
@@ -65,6 +66,7 @@ curl -fsS -b $W/jar -o $W/admin.html http://127.0.0.1:18080/admin; grep -qi "adm
 test "$(curl -s -o /dev/null -w '%{http_code}' -H 'Content-Type: application/json' -d '{"name":"admin","password":"nope-nope-nope"}' http://127.0.0.1:18080/api/login)" = 401
 test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18080/data.json)" = 401
 echo "WEB + AUTH OK"
+if grep -qi "unpacking failed\|Kernel panic" $W/boot.log; then echo "INSTALLED BOOT HAD INITRAMFS/PANIC ERRORS"; exit 1; fi
 # the SCREEN (tty1) must show a login prompt, not a blank cursor: screenshot via the QEMU monitor, count lit pixels
 sleep 20
 screen_check "$W" || { echo "---- boot log (framebuffer / drm / efi lines) ----"; grep -i "fb\|drm\|efi\|framebuffer\|simple\|vga" $W/boot.log | head -40; exit 1; }

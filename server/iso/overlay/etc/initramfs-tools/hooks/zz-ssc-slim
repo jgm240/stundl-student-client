@@ -1,0 +1,19 @@
+#!/bin/sh
+# Keeps the initramfs small. With MODULES=most and the Wi-Fi firmware packages installed it grew to ~210 MB unpacked, which needs
+# far more RAM than a small server VM has ("Initramfs unpacking failed: write error", or the boot loader can't load it at all).
+# Network, Wi-Fi, graphics and similar drivers are not needed to find the root file system; udev loads them after the real
+# root is mounted, where their firmware is available. Storage, USB, CD and file system drivers stay in.
+PREREQ=""
+prereq() { echo "$PREREQ"; }
+case "$1" in prereqs) prereq; exit 0 ;; esac
+
+for base in "${DESTDIR}/usr/lib/modules" "${DESTDIR}/lib/modules"; do
+  for kdir in "$base"/*/kernel; do
+    [ -d "$kdir" ] || continue
+    for d in drivers/gpu drivers/infiniband drivers/net/wireless drivers/net/ethernet drivers/media drivers/staging drivers/bluetooth sound; do
+      rm -rf "$kdir/$d"
+    done
+  done
+done
+rm -rf "${DESTDIR}/usr/lib/firmware" "${DESTDIR}/lib/firmware" 2>/dev/null || true
+exit 0
