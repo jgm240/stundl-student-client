@@ -105,4 +105,5 @@ def validate_answers(a, disks):
     if not re.match(r"^[a-z0-9_-]{1,20}$", out["keymap"]):
         raise ValueError("keymap looks invalid")
     out["ssh"] = bool(a.get("ssh", True))
+    out["autologin"] = bool(a.get("autologin", False))
     return out

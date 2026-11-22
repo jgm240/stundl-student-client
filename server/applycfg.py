@@ -28,6 +28,28 @@ def _write(root, rel, text, mode=0o644):
     os.replace(tmp, p)
 
 
+def _unix_user(root, name):
+    """A normal (uid >= 1000) login user in <root>/etc/passwd."""
+    try:
+        for line in (root / "etc/passwd").read_text().splitlines():
+            f = line.split(":")
+            if len(f) > 3 and f[0] == name and f[2].isdigit() and 1000 <= int(f[2]) < 60000:
+                return True
+    except OSError:
+        pass
+    return False
+
+
+def default_login_user(root=None):
+    """The first normal user on this machine (the one the installer made)."""
+    try:
+        users = sorted((int(f[2]), f[0]) for f in (l.split(":") for l in ((root or serverconf.system_root()) / "etc/passwd").read_text().splitlines())
+                       if len(f) > 3 and f[2].isdigit() and 1000 <= int(f[2]) < 60000)
+    except OSError:
+        return None
+    return users[0][1] if users else None
+
+
 def _interfaces(root):
     d = root / "sys/class/net"
     try:
@@ -126,13 +148,26 @@ def apply_part(part, cfg, root=None, run=_run):
         run(["nft", "-f", str(root / "etc/nftables.conf")])
         run(["systemctl", "enable", "nftables"])
         return ["firewall " + ("on" if cfg["firewall"]["enabled"] else "off")]
+    if part == "console":
+        user = cfg["console"]["autologin_user"]
+        rel = "etc/systemd/system/getty@tty1.service.d/autologin.conf"
+        if user:
+            if not _unix_user(root, user):
+                raise RuntimeError(f"console: there is no normal user '{user}' on this system (auto-login needs the Linux login user)")
+            _write(root, rel, "# Managed by ssconfig\n[Service]\nExecStart=\nExecStart=-/sbin/agetty --autologin " + user + " --noclear %I $TERM\n")
+            note = f"console auto-login as {user} (from the next boot, or: systemctl restart getty@tty1)"
+        else:
+            (root / rel).unlink(missing_ok=True)
+            note = "console auto-login off (from the next boot)"
+        run(["systemctl", "daemon-reload"])
+        return [note]
     if part in ("web", "links"):
         run(["systemctl", "restart", "ssc-server"])
         return ["web service restarted"]
     raise RuntimeError("unknown part " + part)
 
 
-ORDER = ("network", "firewall", "ssh", "web", "links")
+ORDER = ("network", "firewall", "ssh", "console", "web", "links")
 
 
 def apply(parts, cfg=None, root=None, run=_run):

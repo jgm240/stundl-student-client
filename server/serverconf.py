@@ -24,6 +24,7 @@ DEFAULTS = {
     "web": {"port": 8080, "bind": "0.0.0.0", "https": False, "session_hours": 12, "guest_passwordless": False},
     "links": {"enabled": True, "long": False, "port": 8766},
     "network": {"mode": "dhcp", "interface": "auto", "address": "", "gateway": "", "dns": [], "hostname": "ssc-server"},
+    "console": {"autologin_user": ""},
     "wifi": {"enabled": False, "ssid": "", "open": False, "hidden": False, "country": ""},
     "ssh": {"enabled": True, "port": 22, "permit_root": False, "password_auth": True, "allow_users": []},
     "sections": {"guest": ["today", "timetable", "homework", "exams", "plan", "changes"],
@@ -136,6 +137,11 @@ def validate(cfg):
         check_ssid(wf["ssid"])
     elif wf["ssid"]:
         check_ssid(wf["ssid"])
+
+    al = str(c["console"]["autologin_user"]).strip()
+    if al and (not USER_RE.match(al) or al == "root"):
+        raise ValueError("auto-login user: a normal user name (not root)")
+    c["console"]["autologin_user"] = al
 
     s = c["ssh"]
     s["enabled"], s["permit_root"], s["password_auth"] = _bool(s["enabled"]), _bool(s["permit_root"]), _bool(s["password_auth"])

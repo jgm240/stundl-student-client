@@ -133,6 +133,13 @@ def install(ans, run, root=TARGET, efi=None, a=None):
         ch("useradd", "-m", "-s", "/bin/bash", "-G", "sudo", ans["admin"])
         ch("chpasswd", input=f"{ans['admin']}:{ans['password']}\n")
         ch("passwd", "-l", "root")
+        if ans.get("autologin"):
+            full2 = serverconf.validate({**cfg, "console": {"autologin_user": ans["admin"]}})
+            run([sys.executable, "-c", "import sys,json;sys.path.insert(0,sys.argv[1]);import serverconf;serverconf.save(json.loads(sys.argv[2]))",
+                 str(HERE), json.dumps({**cfg, "console": {"autologin_user": ans["admin"]}})], env=env)
+            if not run.dry:
+                applycfg.apply_part("console", full2, root, noop)
+            ch("chown", "-R", "ssc:ssc", "/var/lib/ssc")      # the settings file was rewritten as root
         ch("systemctl", "enable", "ssc-server", "ssc-apply.path", "ssc-banner", "nftables", "ssh", "ssc-sync.timer", check=False)
 
         # the installed system must show a login prompt on the screen (tty1), not a blank cursor
@@ -188,14 +195,14 @@ def ask(disks):
     rc, a["hostname"] = wt("--inputbox", "Name of this server (hostname)", "8", "60", "ssc-server")
     rc, a["admin"] = wt("--inputbox", "Name of the administrator account.\nIt is used for the web admin panel and for logging in on this machine and over SSH.", "11", "70", "admin")
     while True:
-        rc, p1 = wt("--passwordbox", "Administrator password (at least 12 characters)", "9", "60")
+        rc, p1 = wt("--passwordbox", "Administrator password (at least 6 characters)", "9", "60")
         if rc:
             return None
         rc, p2 = wt("--passwordbox", "Repeat the password", "9", "60")
-        if p1 == p2 and len(p1) >= 12:
+        if p1 == p2 and len(p1) >= 6:
             a["password"] = p1
             break
-        wt("--msgbox", "The passwords differ or are shorter than 12 characters.", "8", "60")
+        wt("--msgbox", "The passwords differ or are shorter than 6 characters.", "8", "60")
     rc, mode = wt("--menu", "Network", "12", "64", "2", "dhcp", "Automatic address (DHCP) - recommended", "static", "Fixed IP address")
     a["network"] = {"mode": mode or "dhcp"}
     if mode == "static":
@@ -212,6 +219,7 @@ def ask(disks):
     rc, a["timezone"] = wt("--inputbox", "Time zone (e.g. Europe/Vienna, UTC)", "8", "60", "UTC")
     rc, a["keymap"] = wt("--inputbox", "Keyboard layout (us, de, at, fr, ...)", "8", "60", "us")
     a["ssh"] = wt("--yesno", "Turn on SSH (remote login)?", "8", "50")[0] == 0
+    a["autologin"] = wt("--defaultno", "--yesno", "Log in automatically on this server's own screen and keyboard? (Console only: SSH and the web panel still ask for a password.)\n\nConvenient, but anyone who can touch the machine then has the administrator account.", "11", "70")[0] == 0
     return a
 
 

@@ -102,11 +102,14 @@ class AuthTests(unittest.TestCase):
         with self.assertRaises(auth.AuthError):
             auth.create("bob", "short", "guest", self.con)               # too short
         with self.assertRaises(auth.AuthError):
-            auth.create("root2", "elevenchars", "admin", self.con)       # admin needs 12
+            auth.create("root2", "five5", "admin", self.con)             # 5 characters: too short for every role
+        auth.create("sixsix", "sixsix", "guest", self.con)           # 6 is enough
+        with self.assertRaises(auth.AuthError):
+            auth.create("weak1", "123456", "user", self.con)        # but not a well-known one
         with self.assertRaises(auth.AuthError):
             auth.create("Bad Name", "longenoughpw", "user", self.con)
-        auth.create("boss", "twelve-chars!", "admin", self.con)
-        self.assertEqual([a["role"] for a in auth.accounts(self.con)], ["user", "admin"][::-1] if False else [a["role"] for a in auth.accounts(self.con)])
+        auth.create("boss", "sixsix", "admin", self.con)             # admins too: 6 characters
+        self.assertEqual(sorted(a["role"] for a in auth.accounts(self.con)), ["admin", "guest", "user"])
         self.assertTrue(auth.has_admin(self.con))
 
     def test_hashes_are_salted_and_verify(self):
@@ -698,3 +701,77 @@ class WifiTests(unittest.TestCase):
         self.assertIsNone(p.validate_answers({"password": "twelve-chars!"}, disks)["wifi"])
         with self.assertRaises(ValueError):
             p.validate_answers({"password": "twelve-chars!", "wifi": {"ssid": "Home", "passphrase": "short"}}, disks)
+
+
+class AutologinTests(unittest.TestCase):
+    def setUp(self):
+        self.d = isolate()
+        self.root = Path(self.d) / "root"
+        (self.root / "etc").mkdir(parents=True)
+        (self.root / "etc/passwd").write_text("root:x:0:0::/root:/bin/bash\nssc:x:998:998::/var/lib/ssc:/usr/sbin/nologin\nmax:x:1000:1000::/home/max:/bin/bash\n")
+
+    def run_part(self, cfg):
+        import applycfg
+        seen = []
+
+        class R:
+            returncode, stderr, stdout = 0, "", ""
+        res = applycfg.apply(["console"], cfg, self.root, lambda c: seen.append(c) or R())
+        return res, seen
+
+    def test_validation(self):
+        self.assertEqual(serverconf.validate({"console": {"autologin_user": " max "}})["console"]["autologin_user"], "max")
+        for bad in ("root", "Max Power", "a;b", "x" * 40):
+            with self.assertRaises(ValueError, msg=bad):
+                serverconf.validate({"console": {"autologin_user": bad}})
+        self.assertEqual(serverconf.validate({})["console"]["autologin_user"], "")        # off by default
+
+    def test_apply_writes_and_removes_the_dropin(self):
+        res, seen = self.run_part(serverconf.validate({"console": {"autologin_user": "max"}}))
+        self.assertTrue(res["ok"], res)
+        f = self.root / "etc/systemd/system/getty@tty1.service.d/autologin.conf"
+        self.assertIn("--autologin max --noclear", f.read_text())
+        self.assertIn(["systemctl", "daemon-reload"], seen)
+        # console only: nothing is written for SSH, PAM or the web service, and only tty1 is touched
+        written = sorted(str(x.relative_to(self.root)) for x in self.root.rglob("*") if x.is_file() and x.name != "passwd")
+        self.assertEqual(written, ["etc/systemd/system/getty@tty1.service.d/autologin.conf"])
+        self.assertNotIn("PermitEmptyPasswords", f.read_text())
+        res, _ = self.run_part(serverconf.validate({}))
+        self.assertFalse(f.exists())
+
+    def test_apply_refuses_unknown_and_system_users(self):
+        for u in ("nobody", "ssc", "ghost"):                       # missing, or uid < 1000: no auto-login
+            res, _ = self.run_part(serverconf.validate({"console": {"autologin_user": u}}))
+            self.assertFalse(res["ok"], u)
+            self.assertFalse((self.root / "etc/systemd/system/getty@tty1.service.d/autologin.conf").exists())
+
+    def test_ssconfig_autologin(self):
+        import ssconfig
+        import applycfg
+        ssconfig.addresses = lambda: []
+        os.environ["SSC_ROOT"] = str(self.root)
+        try:
+            self.assertEqual(applycfg.default_login_user(), "max")
+            self.assertEqual(ssconfig.main(["autologin", "on"]), 0)
+            self.assertEqual(serverconf.load()["console"]["autologin_user"], "max")
+            self.assertEqual(ssconfig.main(["autologin", "on", "root"]), 1)
+            self.assertEqual(ssconfig.main(["autologin", "off"]), 0)
+            self.assertEqual(serverconf.load()["console"]["autologin_user"], "")
+        finally:
+            del os.environ["SSC_ROOT"]
+
+    def test_web_login_is_unaffected(self):
+        # the web panel has no passwordless admin path: only an explicit guest option exists, and it never yields the admin role
+        auth.reset_throttle()
+        con = auth.db()
+        auth.create("boss", "sixsix", "admin", con)
+        with self.assertRaises(auth.AuthError):
+            auth.login("boss", "", "9.9.9.9", con)
+        self.assertEqual(auth.guest_session()[:0], "")
+        self.assertEqual(auth.session(auth.guest_session())["role"], "guest")
+
+    def test_installer_answer(self):
+        import install_plan as p
+        disks = [{"path": "/dev/sda", "size": 32 * 10 ** 9, "model": "", "removable": False}]
+        self.assertFalse(p.validate_answers({"password": "sixsix"}, disks)["autologin"])
+        self.assertTrue(p.validate_answers({"password": "sixsix", "autologin": True}, disks)["autologin"])

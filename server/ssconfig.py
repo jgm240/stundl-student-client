@@ -9,6 +9,7 @@
   ssconfig set <setting> <val>  change one setting     e.g.  ssconfig set links.long true
                                                              ssconfig set network.mode static
   ssconfig ip <addr/len> <gateway> [dns,dns]   fixed IP address       ssconfig dhcp   automatic address
+  ssconfig autologin on [user]|off|status   log in on the console without a password
   ssconfig wifi scan|status|set <name> [--open] [--hidden] [--country=AT]|off   Wi-Fi
   ssconfig account add|list|passwd|role|disable|enable|delete ...
   ssconfig untis                set the WebUntis (Untis Mobile) key from a QR text
@@ -81,7 +82,7 @@ def apply_parts(parts):
 
 
 def changed(old, new):
-    parts = [k for k in ("network", "ssh", "firewall", "web", "links") if old[k] != new[k]]
+    parts = [k for k in ("network", "ssh", "firewall", "web", "links", "console") if old[k] != new[k]]
     if old["wifi"] != new["wifi"] and "network" not in parts:
         parts.append("network")
     return parts + (["firewall"] if (old["web"]["port"], old["links"]) != (new["web"]["port"], new["links"]) else [])
@@ -212,6 +213,31 @@ def wifi_set(ssid, passphrase=None, open_net=False, hidden=False, country=None):
     fix_owner()
     apply_parts(sorted(set(changed(old, new) + ["network"])))
     return new
+
+
+def cmd_autologin(args):
+    """ssconfig autologin on [user] | off | status  - log in on this machine's screen and keyboard without typing a password."""
+    import applycfg
+    sub = args[0] if args else "status"
+    cur = serverconf.load()["console"]["autologin_user"]
+    if sub == "status":
+        print("Console auto-login:", f"on, as {cur}" if cur else "off")
+        return 0
+    if sub == "on":
+        user = args[1] if len(args) > 1 else applycfg.default_login_user()
+        if not user:
+            print("No normal Linux user found. Give one:  ssconfig autologin on <user>")
+            return 1
+        set_setting("console.autologin_user", user)
+        print(f"On: the console logs in as {user} (from the next boot, or: systemctl restart getty@tty1).")
+        print("Console only: SSH and the web admin panel still ask for a password.")
+        print("Anyone who can use this machine's keyboard then has that account - and sudo.")
+        return 0
+    if sub == "off":
+        set_setting("console.autologin_user", "")
+        return 0
+    print("usage: ssconfig autologin on [user] | off | status")
+    return 2
 
 
 def cmd_wifi(args):
@@ -352,7 +378,7 @@ def cmd_first_boot(_=None):
         while True:
             try:
                 name = input("Admin name [admin]: ").strip().lower() or "admin"
-                auth.create(name, ask_password("Admin password (12+ characters): "), "admin")
+                auth.create(name, ask_password("Admin password (6+ characters): "), "admin")
                 break
             except auth.AuthError as e:
                 print("  ", e)
@@ -378,8 +404,8 @@ def menu():
         print(__doc__)
         return 0
     while True:
-        rc, ch = wt("--title", "SSC Server", "--menu", "Configure this server", "21", "70", "12",
-                    "ip", "Show IP address and web address", "link", "Show the Parent link", "net", "Network (DHCP / fixed IP)", "wifi", "Wi-Fi",
+        rc, ch = wt("--title", "SSC Server", "--menu", "Configure this server", "22", "70", "13",
+                    "ip", "Show IP address and web address", "link", "Show the Parent link", "net", "Network (DHCP / fixed IP)", "wifi", "Wi-Fi", "auto", "Console auto-login",
                     "web", "Web port, HTTPS, long links", "acc", "Accounts", "ssh", "SSH settings", "untis", "WebUntis key",
                     "sync", "Fetch data now", "rot", "New Parent link", "status", "Status", "quit", "Leave")
         if rc != 0 or ch == "quit":
@@ -395,6 +421,11 @@ def menu():
                 menu_net()
             elif ch == "wifi":
                 menu_wifi()
+            elif ch == "auto":
+                cur = serverconf.load()["console"]["autologin_user"]
+                if wt("--defaultno", "--yesno", ("Auto-login is ON (" + cur + "). Turn it off?") if cur else
+                      "Log in automatically on this machine's own screen and keyboard?\n\nAnyone who can touch the machine then has that account and sudo.", "11", "66")[0] == 0:
+                    cmd_autologin(["off" if cur else "on"])
             elif ch == "web":
                 menu_web()
             elif ch == "ssh":
@@ -555,6 +586,8 @@ def main(argv=None):
             return 0
         if c == "wifi":
             return cmd_wifi(rest)
+        if c == "autologin":
+            return cmd_autologin(rest)
         if c == "dhcp":
             set_setting("network.mode", "dhcp")
             return 0

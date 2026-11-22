@@ -60,7 +60,7 @@ Accounts:()=>`<h1>Accounts</h1><p class="sub"><b>Guest</b> and <b>user</b> accou
   <td>${when(a.last_login)}</td><td style="text-align:right;white-space:nowrap"><button class="b" onclick="newpw('${esc(a.name)}')">Password</button>
   <button class="b" onclick="run(()=>api('/api/admin/accounts/disable',{name:'${esc(a.name)}',disabled:${!a.disabled}}))">${a.disabled?"Enable":"Disable"}</button>
   <button class="b d" onclick="if(confirm('Delete ${esc(a.name)}?'))run(()=>api('/api/admin/accounts/delete',{name:'${esc(a.name)}'}),'Deleted')">Delete</button></td></tr>`).join("")}</table></div>
- <h2>Add an account</h2><div class="card"><div class="row"><input id="an" placeholder="name" autocomplete="off"><input id="ap" type="password" placeholder="password (min 8, admin 12)" autocomplete="new-password">
+ <h2>Add an account</h2><div class="card"><div class="row"><input id="an" placeholder="name" autocomplete="off"><input id="ap" type="password" placeholder="password (min 6)" autocomplete="new-password">
   <select id="ar"><option>guest</option><option selected>user</option><option>admin</option></select><button class="b p" onclick="run(()=>api('/api/admin/accounts',{name:$('#an').value,password:$('#ap').value,role:$('#ar').value}),'Account created')">Add</button></div></div>
  <h2>What each role sees</h2><div class="card grid2">${["guest","user"].map(r=>`<div><label>${r} sections</label>${["today","timetable","homework","exams","plan","changes","grades","absences"].map(x=>`<label style="display:inline-flex;gap:6px;margin-right:10px;color:var(--text)"><input type="checkbox" data-r="${r}" value="${x}" ${C.sections[r].includes(x)?"checked":""}>${x}</label>`).join("")}</div>`).join("")}
   <div><button class="b p" onclick="saveSections()">Save</button></div></div>
@@ -96,7 +96,10 @@ SSH:()=>`<h1>SSH</h1><p class="sub">Remote console access for administrators. Ch
  <div class="row"><label style="display:inline-flex;gap:8px;align-items:center;color:var(--text)">${chk("sr",C.ssh.permit_root)} Allow the root user to log in</label>
  <label style="display:inline-flex;gap:8px;align-items:center;color:var(--text)">${chk("spw",C.ssh.password_auth)} Allow password logins (turn off to require SSH keys)</label></div>
  <div class="row"><div><label>Only these users may log in (blank = all)</label><input id="su" value="${esc(C.ssh.allow_users.join(" "))}" size="30" placeholder="admin ssc-admin"></div></div>
- <div class="row"><button class="b p" onclick="saveSsh()">Save and apply</button></div></div>`,
+ <div class="row"><button class="b p" onclick="saveSsh()">Save and apply</button></div></div>
+ <h2>Console login</h2><div class="card"><p class="sub" style="margin-top:0">Log in on this machine's own screen and keyboard (the text console) without typing a password. <b>Console only:</b> SSH and this web panel still always ask for a password. Anyone who can touch the machine then has that Linux account (and <code>sudo</code>). Takes effect at the next boot.</p>
+ <div class="row"><label style="display:inline-flex;gap:8px;align-items:center;color:var(--text)">${chk("ale",!!C.console.autologin_user)} Log in automatically as</label><input id="alu" value="${esc(C.console.autologin_user)}" size="14" placeholder="Linux user, e.g. admin">
+ <button class="b p" onclick="saveAuto()">Save</button></div></div>`,
 WebUntis:()=>`<h1>WebUntis</h1><p class="sub">The server logs in to WebUntis by itself with the <b>Untis Mobile</b> key (no browser, no password).</p>
  <div class="card"><div class="kv"><span>Connected as</span><b>${esc(S.untis||"nobody yet")}</b></div><div class="kv"><span>Last update</span><b>${when(S.synced_at)}</b></div>
  <div class="row"><div style="flex:1"><label>Untis Mobile QR text - WebUntis → Profile → Freigaben / Access → Untis Mobile → scan the QR code with a phone camera and paste the text (starts with untis://setschool?…)</label>
@@ -111,6 +114,7 @@ function newpw(n){const p=prompt("New password for "+n+":");if(p)run(()=>api("/a
 function saveSections(){const g=r=>[...document.querySelectorAll(`input[data-r=${r}]:checked`)].map(i=>i.value);cfg({sections:{guest:g("guest"),user:g("user")}},"Saved")}
 function saveNet(){cfg({network:{hostname:$("#hn").value,mode:$("#nm").value,interface:$("#if").value,address:$("#ad")?$("#ad").value:"",gateway:$("#gw")?$("#gw").value:"",dns:($("#dn")?$("#dn").value:"")}},"Saved - applying…")}
 function saveWifi(){run(()=>api("/api/admin/wifi",{enabled:$("#wfe").checked,ssid:$("#wfs").value,passphrase:$("#wfp").value,country:$("#wfc").value,open:$("#wfo").checked,hidden:$("#wfh").checked}),"Saved - connecting…")}
+function saveAuto(){cfg({console:{autologin_user:$("#ale").checked?$("#alu").value.trim():""}},"Saved - applies at the next boot")}
 function saveWeb(){cfg({web:{port:+$("#wp").value,bind:$("#wb").value,session_hours:+$("#sh").value,https:$("#hs").checked},firewall:{enabled:$("#fw").checked}},"Saved - the service restarts")}
 function saveLinks(){cfg({links:{enabled:$("#le").checked,long:$("#ll").checked,port:+$("#lp").value}},"Saved")}
 function saveSsh(){cfg({ssh:{enabled:$("#se").checked,port:+$("#sp").value,permit_root:$("#sr").checked,password_auth:$("#spw").checked,allow_users:$("#su").value}},"Saved - applying…")}

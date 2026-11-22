@@ -19,7 +19,7 @@ import core
 
 ROLES = ("guest", "user", "admin")
 NAME_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{1,31}$")
-MIN_LEN = {"guest": 8, "user": 8, "admin": 12}
+MIN_LEN = {"guest": 6, "user": 6, "admin": 6}
 N, R, P = 2 ** 14, 8, 1
 
 
@@ -79,7 +79,7 @@ def _check_name(name):
 def _check_password(role, password):
     if len(password or "") < MIN_LEN[role]:
         raise AuthError(f"a {role} password needs at least {MIN_LEN[role]} characters")
-    if password.lower() in ("password", "12345678", "123456789012", "passwordpassword"):
+    if password.lower() in ("password", "123456", "1234567", "12345678", "123456789012", "passwordpassword", "qwerty", "111111", "000000", "abcdef", "654321"):
         raise AuthError("that password is far too common")
 
 
