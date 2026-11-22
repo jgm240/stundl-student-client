@@ -9,6 +9,8 @@
   ssconfig set <setting> <val>  change one setting     e.g.  ssconfig set links.long true
                                                              ssconfig set network.mode static
   ssconfig ip <addr/len> <gateway> [dns,dns]   fixed IP address       ssconfig dhcp   automatic address
+  ssconfig lid ignore|suspend|poweroff|status   what closing a laptop lid does (ignore = keep running)
+  ssconfig sleep block|allow    never (or sometimes) suspend
   ssconfig autologin on [user]|off|status   log in on the console without a password
   ssconfig wifi scan|status|set <name> [--open] [--hidden] [--country=AT]|off   Wi-Fi
   ssconfig account add|list|passwd|role|disable|enable|delete ...
@@ -82,7 +84,7 @@ def apply_parts(parts):
 
 
 def changed(old, new):
-    parts = [k for k in ("network", "ssh", "firewall", "web", "links", "console") if old[k] != new[k]]
+    parts = [k for k in ("network", "ssh", "firewall", "web", "links", "console", "power") if old[k] != new[k]]
     if old["wifi"] != new["wifi"] and "network" not in parts:
         parts.append("network")
     return parts + (["firewall"] if (old["web"]["port"], old["links"]) != (new["web"]["port"], new["links"]) else [])
@@ -213,6 +215,34 @@ def wifi_set(ssid, passphrase=None, open_net=False, hidden=False, country=None):
     fix_owner()
     apply_parts(sorted(set(changed(old, new) + ["network"])))
     return new
+
+
+def cmd_lid(args):
+    """ssconfig lid ignore|suspend|poweroff|status   what closing the laptop lid does (default: nothing - keep running)"""
+    cfg = serverconf.load()["power"]
+    sub = args[0] if args else "status"
+    if sub == "status":
+        print("Closing the lid:", {"ignore": "does nothing (the machine keeps running)", "suspend": "suspends", "poweroff": "powers off"}[cfg["lid"]])
+        print("Suspend / hibernate:", "blocked" if cfg["block_sleep"] else "allowed")
+        return 0
+    if sub in serverconf.LID_ACTIONS:
+        set_setting("power.lid", sub)
+        print("Lid action:", sub)
+        if sub == "ignore":
+            print("Tip: keep the laptop ventilated with the lid closed, and plug it in.")
+        return 0
+    print("usage: ssconfig lid ignore|suspend|poweroff|status")
+    return 2
+
+
+def cmd_sleep(args):
+    """ssconfig sleep block|allow   block = the machine never suspends or hibernates"""
+    if args and args[0] in ("block", "allow"):
+        set_setting("power.block_sleep", "true" if args[0] == "block" else "false")
+        print("Suspend / hibernate:", "blocked" if args[0] == "block" else "allowed")
+        return 0
+    print("usage: ssconfig sleep block|allow")
+    return 2
 
 
 def cmd_autologin(args):
@@ -404,8 +434,8 @@ def menu():
         print(__doc__)
         return 0
     while True:
-        rc, ch = wt("--title", "SSC Server", "--menu", "Configure this server", "22", "70", "13",
-                    "ip", "Show IP address and web address", "link", "Show the Parent link", "net", "Network (DHCP / fixed IP)", "wifi", "Wi-Fi", "auto", "Console auto-login",
+        rc, ch = wt("--title", "SSC Server", "--menu", "Configure this server", "23", "70", "14",
+                    "ip", "Show IP address and web address", "link", "Show the Parent link", "net", "Network (DHCP / fixed IP)", "wifi", "Wi-Fi", "auto", "Console auto-login", "lid", "Laptop lid / sleep",
                     "web", "Web port, HTTPS, long links", "acc", "Accounts", "ssh", "SSH settings", "untis", "WebUntis key",
                     "sync", "Fetch data now", "rot", "New Parent link", "status", "Status", "quit", "Leave")
         if rc != 0 or ch == "quit":
@@ -421,6 +451,12 @@ def menu():
                 menu_net()
             elif ch == "wifi":
                 menu_wifi()
+            elif ch == "lid":
+                cur = serverconf.load()["power"]["lid"]
+                rc, v = wt("--menu", "Closing the laptop lid...", "13", "64", "3", "ignore", "does nothing: keep running (server)" + ("  <- now" if cur == "ignore" else ""),
+                           "suspend", "suspends" + ("  <- now" if cur == "suspend" else ""), "poweroff", "powers off" + ("  <- now" if cur == "poweroff" else ""))
+                if rc == 0:
+                    cmd_lid([v])
             elif ch == "auto":
                 cur = serverconf.load()["console"]["autologin_user"]
                 if wt("--defaultno", "--yesno", ("Auto-login is ON (" + cur + "). Turn it off?") if cur else
@@ -588,6 +624,10 @@ def main(argv=None):
             return cmd_wifi(rest)
         if c == "autologin":
             return cmd_autologin(rest)
+        if c == "lid":
+            return cmd_lid(rest)
+        if c == "sleep":
+            return cmd_sleep(rest)
         if c == "dhcp":
             set_setting("network.mode", "dhcp")
             return 0

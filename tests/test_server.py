@@ -300,6 +300,20 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(a.req("POST", "/api/admin/wifi", {"enabled": False})[0], 200)
         self.assertFalse(json.loads(a.req("GET", "/api/admin/config")[1])["wifi"]["enabled"])
 
+    def test_web_panel_changes_to_console_and_power_are_applied(self):
+        # the admin panel only drops a request file: every settings group that needs the root helper must be listed in it
+        a = Client(self.port)
+        a.login("boss", "twelve-chars!")
+        req = serverconf.state_dir() / "apply" / "request.json"
+        req.unlink(missing_ok=True)
+        self.assertEqual(a.req("POST", "/api/admin/config", {"power": {"lid": "suspend"}})[0], 200)
+        self.assertIn("power", json.loads(req.read_text())["parts"])
+        req.unlink()
+        self.assertEqual(a.req("POST", "/api/admin/config", {"console": {"autologin_user": "max"}})[0], 200)
+        self.assertIn("console", json.loads(req.read_text())["parts"])
+        a.req("POST", "/api/admin/config", {"power": {"lid": "ignore"}, "console": {"autologin_user": ""}})
+        self.assertEqual(a.req("POST", "/api/admin/config", {"power": {"lid": "sideways"}})[0], 400)
+
     def test_watch_api_is_admin_only_and_validates(self):
         g = Client(self.port)
         g.login("anna", "longenoughpw")
@@ -775,3 +789,65 @@ class AutologinTests(unittest.TestCase):
         disks = [{"path": "/dev/sda", "size": 32 * 10 ** 9, "model": "", "removable": False}]
         self.assertFalse(p.validate_answers({"password": "sixsix"}, disks)["autologin"])
         self.assertTrue(p.validate_answers({"password": "sixsix", "autologin": True}, disks)["autologin"])
+
+
+class PowerTests(unittest.TestCase):
+    def setUp(self):
+        self.d = isolate()
+        self.root = Path(self.d) / "root"
+        self.root.mkdir()
+
+    def apply(self, power):
+        import applycfg
+        seen = []
+
+        class R:
+            returncode, stderr, stdout = 0, "", ""
+        res = applycfg.apply(["power"], serverconf.validate({"power": power}), self.root, lambda c: seen.append(c) or R())
+        return res, seen
+
+    def test_default_keeps_a_closed_laptop_running(self):
+        p = serverconf.validate({})["power"]
+        self.assertEqual((p["lid"], p["block_sleep"]), ("ignore", True))
+        txt = serverconf.render_logind(p)
+        for line in ("HandleLidSwitch=ignore", "HandleLidSwitchExternalPower=ignore", "HandleLidSwitchDocked=ignore", "IdleAction=ignore", "HandleSuspendKey=ignore"):
+            self.assertIn(line, txt)
+
+    def test_image_ships_the_same_default(self):
+        shipped = (ROOT / "server/iso/overlay/etc/systemd/logind.conf.d/ssc-power.conf").read_text()
+        self.assertEqual(shipped, serverconf.render_logind(serverconf.validate({})["power"]))     # live system and fresh installs behave the same
+        hook = (ROOT / "server/iso/hooks/0100-ssc.hook.chroot").read_text()
+        self.assertIn("systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target", hook)
+
+    def test_validation(self):
+        for lid in ("suspend", "poweroff", "ignore"):
+            self.assertEqual(serverconf.validate({"power": {"lid": lid}})["power"]["lid"], lid)
+        for bad in ("hibernate", "", "ignore; reboot", None):
+            with self.assertRaises(ValueError, msg=str(bad)):
+                serverconf.validate({"power": {"lid": bad}})
+
+    def test_apply_writes_the_dropin_masks_sleep_and_restarts_logind(self):
+        res, seen = self.apply({"lid": "ignore", "block_sleep": True})
+        self.assertTrue(res["ok"], res)
+        conf = (self.root / "etc/systemd/logind.conf.d/ssc-power.conf").read_text()
+        self.assertIn("HandleLidSwitch=ignore", conf)
+        self.assertIn(["systemctl", "mask", *serverconf.SLEEP_TARGETS], seen)
+        self.assertIn(["systemctl", "restart", "systemd-logind"], seen)
+        self.assertIn("keeps running", res["done"][0])
+        res, seen = self.apply({"lid": "suspend", "block_sleep": False})
+        self.assertIn("HandleLidSwitch=suspend", (self.root / "etc/systemd/logind.conf.d/ssc-power.conf").read_text())
+        self.assertNotIn("HandleSuspendKey", (self.root / "etc/systemd/logind.conf.d/ssc-power.conf").read_text())
+        self.assertIn(["systemctl", "unmask", *serverconf.SLEEP_TARGETS], seen)
+
+    def test_ssconfig_lid_and_sleep(self):
+        import ssconfig
+        ssconfig.addresses = lambda: []
+        self.assertEqual(ssconfig.main(["lid", "status"]), 0)
+        self.assertEqual(ssconfig.main(["lid", "poweroff"]), 0)
+        self.assertEqual(serverconf.load()["power"]["lid"], "poweroff")
+        self.assertEqual(ssconfig.main(["lid", "sideways"]), 2)
+        self.assertEqual(ssconfig.main(["sleep", "allow"]), 0)
+        self.assertFalse(serverconf.load()["power"]["block_sleep"])
+        self.assertEqual(ssconfig.main(["lid", "ignore"]), 0)
+        self.assertEqual(ssconfig.main(["sleep", "block"]), 0)
+        self.assertEqual(serverconf.load()["power"], {"lid": "ignore", "block_sleep": True})

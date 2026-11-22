@@ -148,6 +148,13 @@ def apply_part(part, cfg, root=None, run=_run):
         run(["nft", "-f", str(root / "etc/nftables.conf")])
         run(["systemctl", "enable", "nftables"])
         return ["firewall " + ("on" if cfg["firewall"]["enabled"] else "off")]
+    if part == "power":
+        pw = cfg["power"]
+        _write(root, "etc/systemd/logind.conf.d/ssc-power.conf", serverconf.render_logind(pw))
+        run(["systemctl", "mask" if pw["block_sleep"] else "unmask", *serverconf.SLEEP_TARGETS])
+        run(["systemctl", "restart", "systemd-logind"])
+        what = {"ignore": "closing the lid does nothing - the machine keeps running", "suspend": "closing the lid suspends", "poweroff": "closing the lid powers off"}[pw["lid"]]
+        return [f"lid: {what}" + ("; suspend/hibernate blocked" if pw["block_sleep"] else "")]
     if part == "console":
         user = cfg["console"]["autologin_user"]
         rel = "etc/systemd/system/getty@tty1.service.d/autologin.conf"
@@ -167,7 +174,7 @@ def apply_part(part, cfg, root=None, run=_run):
     raise RuntimeError("unknown part " + part)
 
 
-ORDER = ("network", "firewall", "ssh", "console", "web", "links")
+ORDER = ("network", "firewall", "ssh", "console", "power", "web", "links")
 
 
 def apply(parts, cfg=None, root=None, run=_run):

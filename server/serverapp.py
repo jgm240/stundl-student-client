@@ -71,7 +71,7 @@ PARTS = {"network": ("network",), "ssh": ("ssh",), "firewall": ("firewall",), "w
 
 def changed_parts(old, new):
     parts = []
-    for k in ("network", "ssh", "firewall", "web", "links"):
+    for k in ("network", "ssh", "firewall", "web", "links", "console", "power"):
         if old[k] != new[k]:
             parts.append(k)
     if old["wifi"] != new["wifi"] and "network" not in parts:

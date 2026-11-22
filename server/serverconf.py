@@ -19,12 +19,15 @@ except Exception:  # pragma: no cover
     SECTIONS = ("today", "timetable", "homework", "exams", "plan", "changes", "grades", "absences")
 
 ROLES = ("guest", "user", "admin")
+LID_ACTIONS = ("ignore", "suspend", "poweroff")
+SLEEP_TARGETS = ("sleep.target", "suspend.target", "hibernate.target", "hybrid-sleep.target")
 
 DEFAULTS = {
     "web": {"port": 8080, "bind": "0.0.0.0", "https": False, "session_hours": 12, "guest_passwordless": False},
     "links": {"enabled": True, "long": False, "port": 8766},
     "network": {"mode": "dhcp", "interface": "auto", "address": "", "gateway": "", "dns": [], "hostname": "ssc-server"},
     "console": {"autologin_user": ""},
+    "power": {"lid": "ignore", "block_sleep": True},
     "wifi": {"enabled": False, "ssid": "", "open": False, "hidden": False, "country": ""},
     "ssh": {"enabled": True, "port": 22, "permit_root": False, "password_auth": True, "allow_users": []},
     "sections": {"guest": ["today", "timetable", "homework", "exams", "plan", "changes"],
@@ -137,6 +140,11 @@ def validate(cfg):
         check_ssid(wf["ssid"])
     elif wf["ssid"]:
         check_ssid(wf["ssid"])
+
+    pw = c["power"]
+    if pw["lid"] not in LID_ACTIONS:
+        raise ValueError("lid action must be one of: " + ", ".join(LID_ACTIONS))
+    pw["block_sleep"] = _bool(pw["block_sleep"])
 
     al = str(c["console"]["autologin_user"]).strip()
     if al and (not USER_RE.match(al) or al == "root"):
@@ -339,6 +347,17 @@ def render_network(cfg, wired, wlan=None):
             out += f"allow-hotplug {wired}\niface {wired} inet dhcp\n\n"
         return out + render_interfaces(cfg["network"], wlan, WPA_CONF_PATH, head=False)
     return render_interfaces(cfg["network"], wired or wlan or "eth0")
+
+
+def render_logind(power):
+    """systemd-logind drop-in: what closing the lid does. 'ignore' = the machine keeps running (an old laptop as a server).
+    block_sleep also ignores the suspend/hibernate keys and idle actions (the sleep targets are masked as well)."""
+    lid = power["lid"]
+    lines = ["# Managed by ssconfig - changes are overwritten", "[Login]", f"HandleLidSwitch={lid}", f"HandleLidSwitchExternalPower={lid}",
+             f"HandleLidSwitchDocked={lid}", "IdleAction=ignore"]
+    if power["block_sleep"]:
+        lines += ["HandleSuspendKey=ignore", "HandleHibernateKey=ignore", "HandleSuspendKeyLongPress=ignore", "HandleHibernateKeyLongPress=ignore"]
+    return "\n".join(lines) + "\n"
 
 
 def render_sshd(ssh):

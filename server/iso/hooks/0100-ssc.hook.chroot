@@ -7,6 +7,8 @@ systemctl enable ssc-server.service ssc-apply.path ssc-banner.service ssc-sync.t
 systemctl enable getty@tty1.service
 # Wi-Fi is started by ifupdown (wpa-conf); the standalone wpa_supplicant service would fight with it
 systemctl mask wpa_supplicant.service 2>/dev/null || true
+# a server: never suspend (the lid and the sleep keys are also ignored by the logind drop-in in the overlay)
+systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target
 # fresh machine-id and host keys are made on first boot / by the installer
 rm -f /etc/ssh/ssh_host_* /etc/machine-id
 touch /etc/machine-id

@@ -33,7 +33,7 @@ const api=async(p,b)=>{const r=await fetch(p,b===undefined?{}:{method:"POST",hea
   if(r.status===403||r.status===401){location.href="/";throw 0}if(!r.ok){throw new Error(j.error||("HTTP "+r.status))}return j};
 const say=(t,ok=true)=>{const m=$("#msg");m.className="msg "+(ok?"ok":"err");m.textContent=t;if(ok)setTimeout(()=>m.className="msg",5000)};
 const run=async(f,okmsg)=>{try{await f();if(okmsg)say(okmsg);await show(tab)}catch(e){if(e)say(e.message,false)}};
-let S=null,C=null,tab="Overview";const TABS=["Overview","Accounts","Network","Web & links","SSH","WebUntis","Activity"];
+let S=null,C=null,tab="Overview";const TABS=["Overview","Accounts","Network","Web & links","SSH","Power","WebUntis","Activity"];
 const when=t=>t?new Date(t*1000).toLocaleString("en-GB"):"never";
 async function logout(){await api("/api/logout",{});location.href="/"}
 async function show(t){tab=t;[S,C]=await Promise.all([api("/api/admin/status"),api("/api/admin/config")]);
@@ -100,6 +100,11 @@ SSH:()=>`<h1>SSH</h1><p class="sub">Remote console access for administrators. Ch
  <h2>Console login</h2><div class="card"><p class="sub" style="margin-top:0">Log in on this machine's own screen and keyboard (the text console) without typing a password. <b>Console only:</b> SSH and this web panel still always ask for a password. Anyone who can touch the machine then has that Linux account (and <code>sudo</code>). Takes effect at the next boot.</p>
  <div class="row"><label style="display:inline-flex;gap:8px;align-items:center;color:var(--text)">${chk("ale",!!C.console.autologin_user)} Log in automatically as</label><input id="alu" value="${esc(C.console.autologin_user)}" size="14" placeholder="Linux user, e.g. admin">
  <button class="b p" onclick="saveAuto()">Save</button></div></div>`,
+Power:()=>`<h1>Power</h1><p class="sub">For old laptops used as servers: keep running with the lid closed.</p>${apply()}
+ <div class="card"><div class="row"><div><label>When the lid is closed</label><select id="pl"><option value="ignore" ${C.power.lid==="ignore"?"selected":""}>Do nothing - keep running</option><option value="suspend" ${C.power.lid==="suspend"?"selected":""}>Suspend</option><option value="poweroff" ${C.power.lid==="poweroff"?"selected":""}>Power off</option></select></div></div>
+ <div class="row"><label style="display:inline-flex;gap:8px;align-items:center;color:var(--text)">${chk("pb",C.power.block_sleep)} Never suspend or hibernate (also ignores the sleep keys and idle timeouts)</label></div>
+ <div class="row"><button class="b p" onclick="savePower()">Save and apply</button></div>
+ <p class="sub">With the lid closed the laptop gets warm: keep the vents free and plug it in. Whether the screen turns off with the lid is up to the laptop's hardware.</p></div>`,
 WebUntis:()=>`<h1>WebUntis</h1><p class="sub">The server logs in to WebUntis by itself with the <b>Untis Mobile</b> key (no browser, no password).</p>
  <div class="card"><div class="kv"><span>Connected as</span><b>${esc(S.untis||"nobody yet")}</b></div><div class="kv"><span>Last update</span><b>${when(S.synced_at)}</b></div>
  <div class="row"><div style="flex:1"><label>Untis Mobile QR text - WebUntis → Profile → Freigaben / Access → Untis Mobile → scan the QR code with a phone camera and paste the text (starts with untis://setschool?…)</label>
@@ -114,6 +119,7 @@ function newpw(n){const p=prompt("New password for "+n+":");if(p)run(()=>api("/a
 function saveSections(){const g=r=>[...document.querySelectorAll(`input[data-r=${r}]:checked`)].map(i=>i.value);cfg({sections:{guest:g("guest"),user:g("user")}},"Saved")}
 function saveNet(){cfg({network:{hostname:$("#hn").value,mode:$("#nm").value,interface:$("#if").value,address:$("#ad")?$("#ad").value:"",gateway:$("#gw")?$("#gw").value:"",dns:($("#dn")?$("#dn").value:"")}},"Saved - applying…")}
 function saveWifi(){run(()=>api("/api/admin/wifi",{enabled:$("#wfe").checked,ssid:$("#wfs").value,passphrase:$("#wfp").value,country:$("#wfc").value,open:$("#wfo").checked,hidden:$("#wfh").checked}),"Saved - connecting…")}
+function savePower(){cfg({power:{lid:$("#pl").value,block_sleep:$("#pb").checked}},"Saved - applying…")}
 function saveAuto(){cfg({console:{autologin_user:$("#ale").checked?$("#alu").value.trim():""}},"Saved - applies at the next boot")}
 function saveWeb(){cfg({web:{port:+$("#wp").value,bind:$("#wb").value,session_hours:+$("#sh").value,https:$("#hs").checked},firewall:{enabled:$("#fw").checked}},"Saved - the service restarts")}
 function saveLinks(){cfg({links:{enabled:$("#le").checked,long:$("#ll").checked,port:+$("#lp").value}},"Saved")}

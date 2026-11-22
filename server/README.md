@@ -23,6 +23,13 @@ ISO for 64-bit (`amd64`) and 32-bit (`i386`, 686-pae) PCs. It can run live from 
 (`{"disk":"auto","hostname":"ssc","admin":"admin","password":"...","timezone":"UTC","keymap":"us","ssh":true,"network":{"mode":"dhcp"}}`);
 the installer runs by itself and powers off when done.
 
+## Old laptops as servers (lid closed)
+By default closing the lid does **nothing** - the machine keeps running - and it never suspends or hibernates (the sleep keys and idle timeouts are ignored too). This is the default of the image (live and installed).
+* **Console:** `ssconfig lid status|ignore|suspend|poweroff` and `ssconfig sleep block|allow`, or "Laptop lid / sleep" in the `ssconfig` menu.
+* **Admin panel:** the Power tab.
+* It's done with systemd-logind (`/etc/systemd/logind.conf.d/ssc-power.conf`) and by masking the sleep targets.
+* With the lid closed a laptop gets warm: keep the vents free and plug it in. Whether the screen turns off or the backlight goes dark is up to the laptop. Not tested on a real laptop lid (QEMU has none), only the generated settings are tested.
+
 ## Wi-Fi
 The image includes `wpa_supplicant` and firmware for common Wi-Fi chips (Intel, Atheros, Realtek, Broadcom, Ralink; Debian's
 `non-free-firmware` packages, redistributed under their own licences). Chips that need other firmware won't work out of the box.
