@@ -167,6 +167,41 @@ class ImgenTests(unittest.TestCase):
         self.assertEqual(self.run_cli("--user", "a", "--address", "1.2.3.4:80", "--password-stdin", "--network", "Home WiFi", "-o", str(d / "n.png"), stdin="pw1234\n")[0], 0)
         self.assertEqual(self.run_cli("--user", "a", "--address", "1.2.3.4:80", "--password-stdin", "--network", "", "-o", str(d / "m.png"), stdin="pw1234\n")[0], 1)
 
+    def test_demo_card_reveals_nothing(self):
+        # the strongest check: two demo cards built from completely different "secrets" are the very same picture
+        a = self.card(address="192.168.1.50:8080", user="anna", password="Blue-Tiger-42", notes="Ask Dad", network="Home WiFi", demo=True)
+        b = self.card(address="10.200.30.4:65000", user="a-much-longer-user-name", password="x" * 63, notes="Something quite different here\nand more", network="W" * 32, demo=True)
+        self.assertEqual(a.tobytes(), b.tobytes())                                  # no content, no length, not even the QR size leaks
+        self.assertNotEqual(a.tobytes(), self.card(notes="Ask Dad", network="Home WiFi").tobytes())
+        for dark in (False, True):
+            for lang in ("en", "de", "pl"):
+                c1 = self.card(user="u1", password="p-one-1", demo=True, dark=dark, lang=lang, cellular_warn=True)
+                c2 = self.card(user="another", password="p-two-2-longer", address="1.1.1.1:1", demo=True, dark=dark, lang=lang, cellular_warn=True)
+                self.assertEqual(c1.tobytes(), c2.tobytes(), (dark, lang))
+
+    def test_demo_banners_are_black_and_cover_the_fields(self):
+        c = self.card(demo=True)
+        for y in (306, 456, 606):                                                   # address, username, password rows
+            self.assertEqual(c.getpixel((100, y)), (0, 0, 0))
+            self.assertEqual(c.getpixel((900, y)), (0, 0, 0))
+        self.assertEqual(c.getpixel((1230, 330)), (0, 0, 0))                         # where the QR code would be
+        self.assertGreater(dark_pixels_light(c, (300, 300, 700, 376)), 300)           # white [REDACTED] lettering on the bar
+        self.assertEqual(self.card(demo=True, qr=False).size, (1500, 900))
+
+    def test_demo_cli_needs_no_secrets_and_prints_none(self):
+        d = Path(tempfile.mkdtemp())
+        rc, out, err = self.run_cli("--demo", "-o", str(d / "demo.png"), stdin="")
+        self.assertEqual(rc, 0, err)
+        self.assertIn("REDACTED", out)
+        self.assertTrue((d / "demo.png").exists())
+        rc, out, _ = self.run_cli("--demo", "--user", "anna", "--address", "192.168.1.50:8080", "--network", "Home WiFi", "--notes", "secret", "-o", str(d / "d2.png"), stdin="")
+        self.assertEqual(rc, 0)
+        self.assertNotIn("192.168.1.50", out)                                        # the terminal output doesn't give the address away either
+        self.assertEqual((d / "demo.png").read_bytes() != b"", True)
+        with self.assertRaises(SystemExit):                                          # without --demo a user is still required
+            with contextlib.redirect_stderr(io.StringIO()):
+                im.main(["-o", str(d / "x.png")])
+
     def test_validation(self):
         for bad in (dict(user=""), dict(password=""), dict(address="not an address"), dict(address="http://1.2.3.4:80")):
             with self.assertRaises(im.CardError, msg=str(bad)):

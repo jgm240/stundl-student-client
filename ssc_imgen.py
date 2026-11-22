@@ -9,6 +9,7 @@ so treat the picture like the password itself (hand it over, then delete it).
   ssc-imgen --user anna --notes "Parents: sign in on the TV in the hall" -o anna.png
   ssc-imgen --address 192.168.1.50:8080 --user gast --password-stdin < pw.txt --dark
   ssc-imgen --user anna -o anna.pdf             .pdf, .png and .jpg work
+  ssc-imgen --demo --network x --notes x        a sample card with [REDACTED] banners over every value (safe to show or share)
   ssc-imgen --user anna --network "Home WiFi"   shows the Wi-Fi network to join, top right
   ssc-imgen --user anna --cellularwarn          adds "Connect to WiFi instead of mobile data to access SSC" (in the card's language)
   ssc-imgen --user anna --lang de               card in German (en de fr es it pt nl pl cs sv da tr; default: system language)
@@ -215,7 +216,18 @@ def rounded_mask(size, radius):
     return m
 
 
-def make_card(address, user, password, notes="", title="SSC Server", qr=True, dark=False, scheme="http", logo=None, lang="en", cellular_warn=False, network=None):
+REDACTED = "[REDACTED]"
+
+
+def redact_bar(d, box, th, size=46):
+    """An opaque black banner with [REDACTED] on it. Its size never depends on what it hides."""
+    x0, y0, x1, y1 = box
+    d.rounded_rectangle(box, min(22, (y1 - y0) // 2), fill=(0, 0, 0), outline=(96, 100, 120) if th is THEMES["dark"] else None, width=3)
+    f = fit_font(d, REDACTED, MONO, (x1 - x0) - 40, size, minimum=18, bold=True)
+    d.text(((x0 + x1) / 2, (y0 + y1) / 2 + 2), REDACTED, font=f, fill=(255, 255, 255), anchor="mm")
+
+
+def make_card(address, user, password, notes="", title="SSC Server", qr=True, dark=False, scheme="http", logo=None, lang="en", cellular_warn=False, network=None, demo=False):
     """-> a PIL image (1500 x 900) with the card."""
     Image, ImageDraw, ImageFont = _pil()
     if not user or not password:
@@ -247,7 +259,10 @@ def make_card(address, user, password, notes="", title="SSC Server", qr=True, da
         tx = 70
     d.text((tx, 38), title, font=load_font(SANS_BOLD, 66, True), fill=th["head_text"])
     d.text((tx, 126), "Stundl Student Client", font=load_font(SANS, 38), fill=(226, 228, 255))
-    if network:                                          # the Wi-Fi network to join, right-aligned in the header
+    if network and demo:
+        d.text((W - 70, 62), T["network"], font=load_font(SANS_BOLD, 26, True), fill=(214, 217, 255), anchor="ra")
+        redact_bar(d, (W - 70 - 440, 96, W - 70, 166), th, 40)
+    elif network:                                          # the Wi-Fi network to join, right-aligned in the header
         tw = d.textlength(title, font=load_font(SANS_BOLD, 66, True))
         room = max(240, (W - 70) - (tx + tw + 60))
         nf = fit_font(d, network, SANS_BOLD, room, 58, minimum=28, bold=True)
@@ -262,6 +277,10 @@ def make_card(address, user, password, notes="", title="SSC Server", qr=True, da
     pitch, box_top, box_h, vsize = (124, 30, 74, 62) if cellular_warn else (150, 34, 84, 70)
     for label, value in rows:
         d.text((left, y), label, font=load_font(SANS_BOLD, 26, True), fill=th["label"])
+        if demo:                                          # nothing of the real value is drawn, and the bar is always as wide as the field
+            redact_bar(d, (left - 18, y + box_top, right + 18, y + box_top + box_h), th, vsize - 10)
+            y += pitch
+            continue
         f = fit_font(d, value, MONO, right - left, vsize)
         d.rounded_rectangle((left - 18, y + box_top, right + 18, y + box_top + box_h), 22, fill=th["soft"])
         d.text((left, y + box_top + box_h // 2 + 2), value, font=f, fill=th["text"], anchor="lm")
@@ -287,11 +306,18 @@ def make_card(address, user, password, notes="", title="SSC Server", qr=True, da
     if notes and notes.strip():
         d.text((left, y + 6), T["notes"], font=load_font(SANS_BOLD, 26, True), fill=th["label"])
         nf = load_font(SANS, 32)
-        for i, line in enumerate(wrap(d, notes.strip(), nf, W - 2 * left, 2)):
-            d.text((left, y + 44 + i * 42), line, font=nf, fill=th["text"])
+        if demo:
+            redact_bar(d, (left - 18, y + 42, right + 18, y + 112), th, 40)
+        else:
+            for i, line in enumerate(wrap(d, notes.strip(), nf, W - 2 * left, 2)):
+                d.text((left, y + 44 + i * 42), line, font=nf, fill=th["text"])
 
     # QR code that opens the address
-    if qr:
+    if qr and demo:                                        # a QR code would give the address away (and its size, the address length)
+        qx, qy, side = 1030, 270, 400
+        redact_bar(d, (qx, qy, qx + side, qy + side), th, 44)
+        d.text((qx + side / 2, qy + side + 34), T["scan"], font=load_font(SANS, 30), fill=th["label"], anchor="mm")
+    elif qr:
         m = qr_matrix(f"{scheme}://{address}/")
         if m:
             n = len(m)
@@ -366,7 +392,7 @@ def get_password(args):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="ssc-imgen", description="Make a printable access card for an SSC Server.")
-    ap.add_argument("--user", "-u", required=True, help="user name")
+    ap.add_argument("--user", "-u", help="user name (not needed with --demo)")
     ap.add_argument("--password", "-p", help="password (visible in shell history and `ps`: prefer the prompt or --password-stdin)")
     ap.add_argument("--password-stdin", action="store_true", help="read the password from the first line of standard input")
     ap.add_argument("--address", "-a", help="ip:port, e.g. 192.168.1.50:8080 (default: detected)")
@@ -376,18 +402,25 @@ def main(argv=None):
     ap.add_argument("--https", action="store_true", help="the QR code opens https:// instead of http://")
     ap.add_argument("--no-qr", action="store_true", help="leave out the QR code")
     ap.add_argument("--dark", action="store_true", help="dark card")
+    ap.add_argument("--demo", action="store_true", help="cover the address, user, password, network and notes (and the QR code) with [REDACTED] banners: safe to show or share")
     ap.add_argument("--network", metavar="NETW-NAME", help="show the Wi-Fi network name to join on the card")
     ap.add_argument("--cellularwarn", action="store_true", help="add a warning: connect to WiFi instead of mobile data to access SSC")
     ap.add_argument("--lang", "-l", default="auto", help="card language: " + ", ".join(sorted(STRINGS)) + " (default: your system language, else en)")
     ap.add_argument("--logo", help="your own logo image instead of the SSC icon")
     ap.add_argument("--output", "-o", default="ssc-card.png", help="file to write: .png, .jpg or .pdf (default ssc-card.png)")
     a = ap.parse_args(argv)
+    if not a.user and not a.demo:
+        ap.error("--user is required (except with --demo)")
     try:
-        address, scheme = (a.address, "https" if a.https else "http") if a.address else detect_address()
+        if a.demo:                                      # no real values are needed (or read, or looked up) for a demo card
+            address, scheme = "0.0.0.0:0", "http"
+        else:
+            address, scheme = (a.address, "https" if a.https else "http") if a.address else detect_address()
         if a.https:
             scheme = "https"
         notes = Path(a.notes_file).read_text() if a.notes_file else a.notes
-        img = make_card(address, a.user, get_password(a), notes, a.title, not a.no_qr, a.dark, scheme, a.logo, pick_language(a.lang), a.cellularwarn, a.network)
+        img = make_card(address, a.user or "demo", "demo" if a.demo else get_password(a), notes, a.title, not a.no_qr, a.dark, scheme, a.logo,
+                        pick_language(a.lang), a.cellularwarn, a.network, a.demo)
         out = Path(a.output)
         if out.suffix.lower() in (".jpg", ".jpeg"):
             img.save(out, quality=95)
@@ -396,7 +429,10 @@ def main(argv=None):
         else:
             img.save(out, "PNG", dpi=(300, 300))
         os.chmod(out, 0o600)                         # the card holds a password: private to you
-        print(f"Wrote {out}  ({address})  - keep it private and delete it after handing it over.")
+        if a.demo:
+            print(f"Wrote {out}  (demo card: every value is covered by [REDACTED] banners)")
+        else:
+            print(f"Wrote {out}  ({address})  - keep it private and delete it after handing it over.")
         return 0
     except (CardError, OSError) as e:
         print("ssc-imgen:", e, file=sys.stderr)
