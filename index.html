@@ -186,6 +186,7 @@ button:focus-visible,select:focus-visible,input:focus-visible,.tile:focus-visibl
 .tile{transition:transform .12s,box-shadow .15s}.tile:hover{transform:translateY(-2px);box-shadow:0 2px 4px rgba(16,24,40,.06),0 14px 30px rgba(16,24,40,.1)}
 #main>p.mut:only-child{padding:42px 16px;text-align:center;font-size:15px}
 .bar .sp{flex:1}
+.dash .item.hw>button,.dash .item.hw .hw-top .badge{display:none}.dash .item.hw{padding:11px 14px}
 </style></head><body>
 <div id="app">
 <aside id="side">
@@ -293,10 +294,11 @@ function tt(){
 }
 function shift(n){const ws=Object.keys(S.timetable).sort(),i=ws.indexOf(wk)+n;if(ws[i]){wk=ws[i];render()}}
 const HWL={missed:"Missed",soon:"Due soon",pending:"Pending",done:"Done"},HWC={missed:"var(--bad)",soon:"var(--warn)",pending:"var(--acc)",done:"var(--ok)"};
-function dueText(h){const d=h.days_left;if(d===null||d===undefined)return "due "+h.due;
-  if(d===0)return "due today";if(d===1)return "due tomorrow";if(d>1)return "due in "+d+" days ("+h.due.slice(5)+")";
-  return (-d)+" day"+(d===-1?"":"s")+" overdue ("+h.due.slice(5)+")"}
-const hwChips=()=>{const m=S.homework_summary||{};return ["missed","soon","pending","done"].filter(k=>m[k]).map(k=>`<span class="badge" style="background:${HWC[k]}">${m[k]} ${HWL[k].toLowerCase()}</span>`).join(" ")};
+const shortDate=s=>s?new Date(s+"T12:00").toLocaleDateString(SSCUI.locale(),{day:"numeric",month:"short"}):"";
+function dueText(h){const d=h.days_left,sd=shortDate(h.due);if(d===null||d===undefined)return "due "+sd;
+  if(d===0)return "due today";if(d===1)return "due tomorrow";if(d>1)return "due in "+d+" days ("+sd+")";
+  return (-d)+" day"+(d===-1?"":"s")+" overdue ("+sd+")"}
+const hwChips=()=>{const m=S.homework_summary||{};return ["missed","soon","pending","done"].filter(k=>m[k]).map(k=>`<span class="badge" style="background:${HWC[k]}">${m[k]} <span>${HWL[k]}</span></span>`).join(" ")};
 function subjChip(s){return s?`<span class="subj" style="--h:${hue(s)}">${esc(s)}</span>`:`<span class="subj none">No subject</span>`}
 function hwItem(h){return `<div class="item hw ${h.status==="done"?"done":""}" style="border-left:4px solid ${HWC[h.status]}"><input type="checkbox" ${h.done?"checked":""} ${SNAP?"disabled":""} onchange="toggle('${esc(h.id)}',this.checked)" title="Mark done on this Mac">
   <div class="b"><div class="hw-top">${subjChip(h.subject)}<span class="badge" style="background:${HWC[h.status]}">${HWL[h.status]}</span><small class="due" style="${h.status==="missed"?"color:var(--bad)":""}">${esc(dueText(h))}</small></div>
@@ -310,8 +312,8 @@ function hw(){
   const pick={todo:h=>!h.dismissed&&h.status!=="done",done:h=>h.status==="done",dismissed:h=>h.dismissed,all:()=>true}[hwFilter];
   const cnt={todo:(sm.missed||0)+(sm.soon||0)+(sm.pending||0),done:S.homework.filter(h=>h.status==="done").length,dismissed:sm.dismissed||0,all:S.homework.length};
   const l=base.filter(pick).filter(h=>!hwStatus||h.status===hwStatus);
-  const tabs=Object.entries({todo:"To do",done:"Done",dismissed:"Dismissed",all:"All"}).map(([k,v])=>`<button class="${hwFilter===k?"on":""}" onclick="hwFilter='${k}';hwStatus='';render()">${v} (${cnt[k]})</button>`).join("");
-  const chips=["missed","soon","pending","done"].map(k=>`<button class="${hwStatus===k?"on":""}" style="border-left:4px solid ${HWC[k]}" onclick="hwStatus=hwStatus==='${k}'?'':'${k}';render()">${HWL[k]} ${sm[k]||0}</button>`).join("");
+  const tabs=Object.entries({todo:"To do",done:"Done",dismissed:"Dismissed",all:"All"}).map(([k,v])=>`<button class="${hwFilter===k?"on":""}" onclick="hwFilter='${k}';hwStatus='';render()"><span>${v}</span> (${cnt[k]})</button>`).join("");
+  const chips=["missed","soon","pending","done"].map(k=>`<button class="${hwStatus===k?"on":""}" style="border-left:4px solid ${HWC[k]}" onclick="hwStatus=hwStatus==='${k}'?'':'${k}';render()"><span>${HWL[k]}</span> ${sm[k]||0}</button>`).join("");
   const grp=Object.entries({status:"By status",subject:"By subject",date:"By due date"}).map(([k,v])=>`<button class="${hwGroup===k?"on":""}" onclick="hwGroup='${k}';render()">${v}</button>`).join("");
   const order=["missed","soon","pending","done"],byDue=(a,b)=>a.due<b.due?-1:1;
   let groups;
@@ -321,7 +323,8 @@ function hw(){
   else groups=order.map(k=>[k,l.filter(h=>h.status===k).sort(byDue)]).filter(g=>g[1].length);
   const head=(k,items)=>!k?"":k[0]==="s"&&k[1]===":"?`<h2 class="gh">${subjChip(k.slice(2))} <span>· ${items.length}</span></h2>`:k[0]==="d"&&k[1]===":"?`<h2>${k.length>2&&k.slice(2)?dayName(k.slice(2)):""} · ${items.length}</h2>`:`<h2 style="color:${HWC[k]}">${HWL[k]} · ${items.length}</h2>`;
   return `<div class="bar">${tabs}<select onchange="hwSub=this.value;render()"><option value="">All subjects</option>${subs.map(s=>`<option ${s===hwSub?"selected":""}>${esc(s)}</option>`).join("")}</select></div>
-   <div class="bar">${chips}<span class="sp"></span><span class="mut">Group</span>${grp}</div>
+   <div class="bar">${chips}</div>
+   <div class="bar"><span class="mut">Group</span>${grp}</div>
    <div class="bar"><span class="mut">Done and long-missed homework is dismissed automatically (change this in Settings).</span></div>`+
    (groups.map(([k,items])=>head(k,items)+items.map(hwItem).join("")).join("")||`<p class="mut">Nothing here.</p>`);
 }
