@@ -9,6 +9,7 @@ so treat the picture like the password itself (hand it over, then delete it).
   ssc-imgen --user anna --notes "Parents: sign in on the TV in the hall" -o anna.png
   ssc-imgen --address 192.168.1.50:8080 --user gast --password-stdin < pw.txt --dark
   ssc-imgen --user anna -o anna.pdf             .pdf, .png and .jpg work
+  ssc-imgen --user anna --network "Home WiFi"   shows the Wi-Fi network to join, top right
   ssc-imgen --user anna --cellularwarn          adds "Connect to WiFi instead of mobile data to access SSC" (in the card's language)
   ssc-imgen --user anna --lang de               card in German (en de fr es it pt nl pl cs sv da tr; default: system language)
 
@@ -44,40 +45,52 @@ MONO = ["/System/Library/Fonts/Menlo.ttc", "/System/Library/Fonts/Courier.ttc", 
 STRINGS = {
     "en": dict(address="ADDRESS", user="USERNAME", password="PASSWORD", notes="NOTES", scan="Scan to open",
                private="Keep this card private - it contains a password.",
-               cellular="Connect to WiFi instead of mobile data to access SSC"),
+               cellular="Connect to WiFi instead of mobile data to access SSC",
+               network="NETWORK"),
     "de": dict(address="ADRESSE", user="BENUTZERNAME", password="PASSWORT", notes="HINWEISE", scan="Zum Öffnen scannen",
                private="Diese Karte vertraulich behandeln - sie enthält ein Passwort.",
-               cellular="Für den Zugriff auf SSC mit dem WLAN statt mit mobilen Daten verbinden"),
+               cellular="Für den Zugriff auf SSC mit dem WLAN statt mit mobilen Daten verbinden",
+               network="NETZWERK"),
     "fr": dict(address="ADRESSE", user="NOM D'UTILISATEUR", password="MOT DE PASSE", notes="NOTES", scan="Scanner pour ouvrir",
                private="Gardez cette carte confidentielle : elle contient un mot de passe.",
-               cellular="Connectez-vous au Wi-Fi plutôt qu'aux données mobiles pour accéder à SSC"),
+               cellular="Connectez-vous au Wi-Fi plutôt qu'aux données mobiles pour accéder à SSC",
+               network="RÉSEAU"),
     "es": dict(address="DIRECCIÓN", user="USUARIO", password="CONTRASEÑA", notes="NOTAS", scan="Escanea para abrir",
                private="Mantén esta tarjeta en privado: contiene una contraseña.",
-               cellular="Conéctate al Wi-Fi en lugar de usar datos móviles para acceder a SSC"),
+               cellular="Conéctate al Wi-Fi en lugar de usar datos móviles para acceder a SSC",
+               network="RED"),
     "it": dict(address="INDIRIZZO", user="NOME UTENTE", password="PASSWORD", notes="NOTE", scan="Scansiona per aprire",
                private="Tieni questa carta riservata: contiene una password.",
-               cellular="Collegati al Wi-Fi invece che ai dati mobili per accedere a SSC"),
+               cellular="Collegati al Wi-Fi invece che ai dati mobili per accedere a SSC",
+               network="RETE"),
     "pt": dict(address="ENDEREÇO", user="USUÁRIO", password="SENHA", notes="NOTAS", scan="Digitalize para abrir",
                private="Mantenha este cartão em sigilo: ele contém uma senha.",
-               cellular="Conecte-se ao Wi-Fi em vez de usar dados móveis para acessar o SSC"),
+               cellular="Conecte-se ao Wi-Fi em vez de usar dados móveis para acessar o SSC",
+               network="REDE"),
     "nl": dict(address="ADRES", user="GEBRUIKERSNAAM", password="WACHTWOORD", notes="OPMERKINGEN", scan="Scan om te openen",
                private="Houd deze kaart privé: er staat een wachtwoord op.",
-               cellular="Maak verbinding met wifi in plaats van mobiele data om SSC te openen"),
+               cellular="Maak verbinding met wifi in plaats van mobiele data om SSC te openen",
+               network="NETWERK"),
     "pl": dict(address="ADRES", user="NAZWA UŻYTKOWNIKA", password="HASŁO", notes="UWAGI", scan="Zeskanuj, aby otworzyć",
                private="Zachowaj tę kartę w tajemnicy - zawiera hasło.",
-               cellular="Połącz się z Wi-Fi zamiast używać danych mobilnych, aby uzyskać dostęp do SSC"),
+               cellular="Połącz się z Wi-Fi zamiast używać danych mobilnych, aby uzyskać dostęp do SSC",
+               network="SIEĆ"),
     "cs": dict(address="ADRESA", user="UŽIVATELSKÉ JMÉNO", password="HESLO", notes="POZNÁMKY", scan="Naskenujte pro otevření",
                private="Uchovejte tuto kartu v soukromí - obsahuje heslo.",
-               cellular="Pro přístup k SSC se připojte k Wi-Fi místo mobilních dat"),
+               cellular="Pro přístup k SSC se připojte k Wi-Fi místo mobilních dat",
+               network="SÍŤ"),
     "sv": dict(address="ADRESS", user="ANVÄNDARNAMN", password="LÖSENORD", notes="ANTECKNINGAR", scan="Skanna för att öppna",
                private="Håll kortet privat - det innehåller ett lösenord.",
-               cellular="Anslut till Wi-Fi i stället för mobildata för att komma åt SSC"),
+               cellular="Anslut till Wi-Fi i stället för mobildata för att komma åt SSC",
+               network="NÄTVERK"),
     "da": dict(address="ADRESSE", user="BRUGERNAVN", password="ADGANGSKODE", notes="NOTER", scan="Scan for at åbne",
                private="Hold kortet privat - det indeholder en adgangskode.",
-               cellular="Opret forbindelse til Wi-Fi i stedet for mobildata for at få adgang til SSC"),
+               cellular="Opret forbindelse til Wi-Fi i stedet for mobildata for at få adgang til SSC",
+               network="NETVÆRK"),
     "tr": dict(address="ADRES", user="KULLANICI ADI", password="PAROLA", notes="NOTLAR", scan="Açmak için tarayın",
                private="Bu kartı gizli tutun - bir parola içerir.",
-               cellular="SSC'ye erişmek için mobil veri yerine Wi-Fi'ye bağlanın"),
+               cellular="SSC'ye erişmek için mobil veri yerine Wi-Fi'ye bağlanın",
+               network="AĞ"),
 }
 
 
@@ -143,6 +156,23 @@ def fit_font(draw, text, candidates, max_width, start, minimum=22, bold=False):
     return load_font(candidates, minimum, bold)
 
 
+def clip_text(draw, text, font, max_width):
+    """`text`, or its start plus '...' if it is wider than max_width."""
+    if draw.textlength(text, font=font) <= max_width:
+        return text
+    while text and draw.textlength(text + "...", font=font) > max_width:
+        text = text[:-1]
+    return text + "..."
+
+
+def check_network(name):
+    """A Wi-Fi network name (SSID): 1-32 bytes, no control characters."""
+    name = str(name).strip()
+    if not name or len(name.encode("utf-8")) > 32 or any(ord(c) < 32 or ord(c) == 127 for c in name):
+        raise CardError("the network name should be 1-32 characters without control characters")
+    return name
+
+
 def wrap(draw, text, font, max_width, max_lines):
     """Word-wrap `text` (explicit newlines are kept); anything beyond max_lines ends in an ellipsis."""
     lines = []
@@ -185,7 +215,7 @@ def rounded_mask(size, radius):
     return m
 
 
-def make_card(address, user, password, notes="", title="SSC Server", qr=True, dark=False, scheme="http", logo=None, lang="en", cellular_warn=False):
+def make_card(address, user, password, notes="", title="SSC Server", qr=True, dark=False, scheme="http", logo=None, lang="en", cellular_warn=False, network=None):
     """-> a PIL image (1500 x 900) with the card."""
     Image, ImageDraw, ImageFont = _pil()
     if not user or not password:
@@ -193,6 +223,7 @@ def make_card(address, user, password, notes="", title="SSC Server", qr=True, da
     if not re.fullmatch(r"[^\s/]+:\d{1,5}|[^\s/:]+", address):
         raise CardError("the address should look like 192.168.1.50:8080")
     T = STRINGS[pick_language(lang)]
+    network = check_network(network) if network is not None else None
     th = THEMES["dark" if dark else "light"]
     card = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     d = ImageDraw.Draw(card)
@@ -216,6 +247,13 @@ def make_card(address, user, password, notes="", title="SSC Server", qr=True, da
         tx = 70
     d.text((tx, 38), title, font=load_font(SANS_BOLD, 66, True), fill=th["head_text"])
     d.text((tx, 126), "Stundl Student Client", font=load_font(SANS, 38), fill=(226, 228, 255))
+    if network:                                          # the Wi-Fi network to join, right-aligned in the header
+        tw = d.textlength(title, font=load_font(SANS_BOLD, 66, True))
+        room = max(240, (W - 70) - (tx + tw + 60))
+        nf = fit_font(d, network, SANS_BOLD, room, 58, minimum=28, bold=True)
+        shown = clip_text(d, network, nf, room)
+        d.text((W - 70, 62), T["network"], font=load_font(SANS_BOLD, 26, True), fill=(214, 217, 255), anchor="ra")
+        d.text((W - 70, 130), shown, font=nf, fill=th["head_text"], anchor="rm")
 
     # credentials
     left, right = 80, 960 if qr else W - 80
@@ -338,6 +376,7 @@ def main(argv=None):
     ap.add_argument("--https", action="store_true", help="the QR code opens https:// instead of http://")
     ap.add_argument("--no-qr", action="store_true", help="leave out the QR code")
     ap.add_argument("--dark", action="store_true", help="dark card")
+    ap.add_argument("--network", metavar="NETW-NAME", help="show the Wi-Fi network name to join on the card")
     ap.add_argument("--cellularwarn", action="store_true", help="add a warning: connect to WiFi instead of mobile data to access SSC")
     ap.add_argument("--lang", "-l", default="auto", help="card language: " + ", ".join(sorted(STRINGS)) + " (default: your system language, else en)")
     ap.add_argument("--logo", help="your own logo image instead of the SSC icon")
@@ -348,7 +387,7 @@ def main(argv=None):
         if a.https:
             scheme = "https"
         notes = Path(a.notes_file).read_text() if a.notes_file else a.notes
-        img = make_card(address, a.user, get_password(a), notes, a.title, not a.no_qr, a.dark, scheme, a.logo, pick_language(a.lang), a.cellularwarn)
+        img = make_card(address, a.user, get_password(a), notes, a.title, not a.no_qr, a.dark, scheme, a.logo, pick_language(a.lang), a.cellularwarn, a.network)
         out = Path(a.output)
         if out.suffix.lower() in (".jpg", ".jpeg"):
             img.save(out, quality=95)

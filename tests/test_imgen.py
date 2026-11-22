@@ -12,6 +12,11 @@ sys.path.insert(0, str(ROOT))
 import ssc_imgen as im  # noqa: E402
 
 
+def dark_pixels_light(img, box):
+    px = img.crop(box).convert("L")
+    return sum(1 for v in px.getdata() if v > 235)
+
+
 def dark_pixels(img, box):
     px = img.crop(box).convert("L")
     return sum(1 for v in px.getdata() if v < 60)
@@ -129,6 +134,38 @@ class ImgenTests(unittest.TestCase):
         d = Path(tempfile.mkdtemp())
         self.assertEqual(self.run_cli("--user", "a", "--address", "1.2.3.4:80", "--password-stdin", "--cellularwarn", "-o", str(d / "w.png"), stdin="pw1234\n")[0], 0)
         self.assertTrue((d / "w.png").exists())
+
+    def test_network_name_in_the_header(self):
+        box = (900, 40, 1440, 170)
+        plain, named = self.card(), self.card(network="Home WiFi")
+        self.assertLess(dark_pixels_light(plain, box), 30)
+        self.assertGreater(dark_pixels_light(named, box), 1200)                    # light text on the indigo header
+        self.assertEqual(named.size, (1500, 900))
+        self.assertEqual(named.crop((60, 215, 1000, 840)).tobytes(), plain.crop((60, 215, 1000, 840)).tobytes())   # the rest of the card is unchanged
+        for code in im.STRINGS:
+            self.assertTrue(im.STRINGS[code]["network"].strip(), code)
+        self.assertNotEqual(self.card(network="Home WiFi", lang="de").tobytes(), named.tobytes())
+
+    def test_long_network_names_and_titles_never_collide(self):
+        img = self.card(network="W" * 32, title="A rather long custom card heading")
+        self.assertEqual(img.size, (1500, 900))
+        Image, ImageDraw, _ = im._pil()
+        d = ImageDraw.Draw(Image.new("RGB", (10, 10)))
+        f = im.load_font(im.SANS_BOLD, 40, True)
+        clipped = im.clip_text(d, "x" * 200, f, 300)
+        self.assertTrue(clipped.endswith("...") and d.textlength(clipped, font=f) <= 300)
+        self.assertEqual(im.clip_text(d, "short", f, 300), "short")
+
+    def test_network_validation_and_all_options_together(self):
+        for bad in ("", "   ", "x" * 33, "bad\nname"):
+            with self.assertRaises(im.CardError, msg=repr(bad)):
+                self.card(network=bad)
+        self.assertEqual(im.check_network("  Ünï WiFi "), "Ünï WiFi")
+        c = self.card(network="Home WiFi", cellular_warn=True, notes="a\nb", dark=True, lang="pl")
+        self.assertEqual(c.size, (1500, 900))
+        d = Path(tempfile.mkdtemp())
+        self.assertEqual(self.run_cli("--user", "a", "--address", "1.2.3.4:80", "--password-stdin", "--network", "Home WiFi", "-o", str(d / "n.png"), stdin="pw1234\n")[0], 0)
+        self.assertEqual(self.run_cli("--user", "a", "--address", "1.2.3.4:80", "--password-stdin", "--network", "", "-o", str(d / "m.png"), stdin="pw1234\n")[0], 1)
 
     def test_validation(self):
         for bad in (dict(user=""), dict(password=""), dict(address="not an address"), dict(address="http://1.2.3.4:80")):

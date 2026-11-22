@@ -35,7 +35,7 @@ The image includes `wpa_supplicant` and firmware for common Wi-Fi chips (Intel, 
   Set the country code, or 5 GHz networks may not be found. WPA2-Personal and open networks only (no WPA3-only or enterprise/802.1X).
 
 ## Access cards
-`ssc-imgen --user anna --notes "Sign in on the TV" -o anna.png` makes a printable card (logo, the server's `ip:port`, user name, password, notes, QR code) to hand to a family member - like a hotel Wi-Fi card. The address is detected from this server's settings. `--lang de` (12 languages) changes the card's language, and `--cellularwarn` adds a notice to use WiFi instead of mobile data. The password is typed at a prompt (it can't be read back from the server, which only keeps hashes) and appears only on the picture: delete the file after printing.
+`ssc-imgen --user anna --notes "Sign in on the TV" -o anna.png` makes a printable card (logo, the server's `ip:port`, user name, password, notes, QR code) to hand to a family member - like a hotel Wi-Fi card. The address is detected from this server's settings. `--lang de` (12 languages) changes the card's language, `--network "Home WiFi"` shows the network name to join, and `--cellularwarn` adds a notice to use WiFi instead of mobile data. The password is typed at a prompt (it can't be read back from the server, which only keeps hashes) and appears only on the picture: delete the file after printing.
 
 ## Notes and limits
 * Beta software. The ISOs are tested in QEMU (boot, unattended install, first boot, web login), not on a wide range of real hardware.
