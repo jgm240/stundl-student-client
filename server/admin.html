@@ -72,6 +72,15 @@ Network:()=>`<h1>Network</h1><p class="sub">Careful: a wrong static address can 
  <div id="st" style="display:${C.network.mode==="static"?"block":"none"}"><div class="row"><div><label>IP address / prefix</label><input id="ad" placeholder="192.168.1.50/24" value="${esc(C.network.address)}"></div>
  <div><label>Gateway</label><input id="gw" placeholder="192.168.1.1" value="${esc(C.network.gateway)}"></div><div><label>DNS servers</label><input id="dn" placeholder="1.1.1.1, 9.9.9.9" value="${esc(C.network.dns.join(", "))}"></div></div></div>
  <div class="row"><button class="b p" onclick="saveNet()">Save and apply</button></div></div>
+ <h2>Wi-Fi</h2><div class="card">${S.wifi_card?`<p class="sub" style="margin-top:0">Wireless card: <code>${esc(S.wifi_card)}</code>. When Wi-Fi is on, the address settings above apply to it and a network cable (if any) uses DHCP. The password is never stored - only a derived key, readable by root alone.</p>
+ <div class="row"><label style="display:inline-flex;gap:8px;align-items:center;color:var(--text)"><input type="checkbox" id="wfe" ${C.wifi.enabled?"checked":""}> Use Wi-Fi</label></div>
+ <div class="row"><div><label>Network name (SSID)</label><input id="wfs" value="${esc(C.wifi.ssid)}"></div><div><label>Password</label><input id="wfp" type="password" autocomplete="new-password" placeholder="${C.wifi.enabled&&!C.wifi.open?"unchanged":""}"></div>
+ <div><label>Country</label><input id="wfc" value="${esc(C.wifi.country)}" size="3" maxlength="2" placeholder="AT"></div></div>
+ <div class="row"><label style="display:inline-flex;gap:8px;align-items:center;color:var(--text)"><input type="checkbox" id="wfo" ${C.wifi.open?"checked":""}> Open network (no password)</label>
+ <label style="display:inline-flex;gap:8px;align-items:center;color:var(--text)"><input type="checkbox" id="wfh" ${C.wifi.hidden?"checked":""}> Hidden network</label></div>
+ <div class="row"><button class="b p" onclick="saveWifi()">Save and connect</button></div>
+ <p class="sub">Careful: if you change this while connected over Wi-Fi, the server may get a new address. Find it on the console with <code>ssconfig showip</code>.</p>`
+ :`<p class="sub" style="margin:0">No Wi-Fi card was found in this machine.</p>`}</div>
  <h2>Current addresses</h2><div class="card">${S.addresses.map(a=>`<div class="kv"><span>${esc(a[0])}</span><b>${esc(a[1])}</b></div>`).join("")||"-"}</div>`,
 "Web & links":()=>`<h1>Web & links</h1><p class="sub">The web interface and the optional sign-in-free wall-display links.</p>${apply()}
  <div class="card"><div class="row"><div><label>Web port</label><input id="wp" type="number" value="${C.web.port}" style="width:100px"></div><div><label>Listen on</label><input id="wb" value="${esc(C.web.bind)}" size="14"></div>
@@ -101,6 +110,7 @@ Activity:async()=>{const l=await api("/api/admin/audit");return `<h1>Activity</h
 function newpw(n){const p=prompt("New password for "+n+":");if(p)run(()=>api("/api/admin/accounts/password",{name:n,password:p}),"Password changed")}
 function saveSections(){const g=r=>[...document.querySelectorAll(`input[data-r=${r}]:checked`)].map(i=>i.value);cfg({sections:{guest:g("guest"),user:g("user")}},"Saved")}
 function saveNet(){cfg({network:{hostname:$("#hn").value,mode:$("#nm").value,interface:$("#if").value,address:$("#ad")?$("#ad").value:"",gateway:$("#gw")?$("#gw").value:"",dns:($("#dn")?$("#dn").value:"")}},"Saved - applying…")}
+function saveWifi(){run(()=>api("/api/admin/wifi",{enabled:$("#wfe").checked,ssid:$("#wfs").value,passphrase:$("#wfp").value,country:$("#wfc").value,open:$("#wfo").checked,hidden:$("#wfh").checked}),"Saved - connecting…")}
 function saveWeb(){cfg({web:{port:+$("#wp").value,bind:$("#wb").value,session_hours:+$("#sh").value,https:$("#hs").checked},firewall:{enabled:$("#fw").checked}},"Saved - the service restarts")}
 function saveLinks(){cfg({links:{enabled:$("#le").checked,long:$("#ll").checked,port:+$("#lp").value}},"Saved")}
 function saveSsh(){cfg({ssh:{enabled:$("#se").checked,port:+$("#sp").value,permit_root:$("#sr").checked,password_auth:$("#spw").checked,allow_users:$("#su").value}},"Saved - applying…")}

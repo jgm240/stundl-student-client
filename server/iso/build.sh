@@ -18,7 +18,7 @@ esac
 lb config noauto \
   --distribution bookworm --architectures "$ARCH" --linux-flavours "$FLAVOUR" \
   --binary-images iso-hybrid $BOOT --debian-installer none \
-  --archive-areas main --apt-recommends false --apt-indices false \
+  --archive-areas "main non-free-firmware" --apt-recommends false --apt-indices false \
   --iso-volume "SSC-SERVER-$ARCH" --iso-application "SSC Server" --iso-publisher "SSC Server project" \
   --bootappend-live "boot=live components quiet splash=0 console=tty0 console=ttyS0,115200" \
   --mirror-bootstrap http://deb.debian.org/debian --mirror-binary http://deb.debian.org/debian \

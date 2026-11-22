@@ -280,6 +280,23 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(json.loads(c.req("GET", "/api/me")[1])["role"], "guest")
         a.req("POST", "/api/admin/config", {"web": {"guest_passwordless": False}})
 
+    def test_wifi_api(self):
+        g = Client(self.port)
+        g.login("anna", "longenoughpw")
+        self.assertEqual(g.req("POST", "/api/admin/wifi", {"ssid": "x", "passphrase": "correct horse"})[0], 403)
+        a = Client(self.port)
+        a.login("boss", "twelve-chars!")
+        self.assertEqual(a.req("POST", "/api/admin/wifi", {"ssid": "Home"})[0], 400)                        # new network needs a password
+        self.assertEqual(a.req("POST", "/api/admin/wifi", {"ssid": "Home", "passphrase": "short"})[0], 400)
+        s, b, _ = a.req("POST", "/api/admin/wifi", {"ssid": "Home", "passphrase": "correct horse", "country": "at"})
+        self.assertEqual(s, 200)
+        self.assertNotIn("correct horse", b)
+        self.assertNotIn("psk", json.loads(a.req("GET", "/api/admin/config")[1])["wifi"])
+        self.assertEqual(json.loads(a.req("GET", "/api/admin/config")[1])["wifi"]["ssid"], "Home")
+        self.assertEqual(a.req("POST", "/api/admin/wifi", {"ssid": "Home"})[0], 200)                        # same network: keep the key
+        self.assertEqual(a.req("POST", "/api/admin/wifi", {"enabled": False})[0], 200)
+        self.assertFalse(json.loads(a.req("GET", "/api/admin/config")[1])["wifi"]["enabled"])
+
     def test_watch_api_is_admin_only_and_validates(self):
         g = Client(self.port)
         g.login("anna", "longenoughpw")
@@ -541,3 +558,143 @@ class UntisDirectTests(unittest.TestCase):
                 self.assertNotIn(self.KEY.encode(), f.read_bytes())
         self.u.clear_credentials()
         self.assertIsNone(self.u.load_credentials())
+
+
+IW_SCAN = """BSS aa:bb:cc:dd:ee:01(on wlan0)
+\tfreq: 2412
+\tsignal: -48.00 dBm
+\tSSID: HomeNet
+\tRSN:\t * Version: 1
+BSS aa:bb:cc:dd:ee:02(on wlan0)
+\tsignal: -70.00 dBm
+\tSSID: HomeNet
+\tRSN:\t * Version: 1
+BSS aa:bb:cc:dd:ee:03(on wlan0)
+\tsignal: -60.00 dBm
+\tSSID: Cafe Open
+\tcapability: ESS (0x0401)
+BSS aa:bb:cc:dd:ee:04(on wlan0)
+\tsignal: -50.00 dBm
+\tSSID:
+BSS aa:bb:cc:dd:ee:05(on wlan0)
+\tsignal: -52.00 dBm
+\tSSID: \\x00\\x00\\x00
+"""
+
+
+class WifiTests(unittest.TestCase):
+    def setUp(self):
+        self.d = isolate()
+        auth.reset_throttle()
+
+    def test_psk_matches_the_ieee_80211i_test_vector(self):
+        self.assertEqual(serverconf.derive_psk("IEEE", "password"), "f42c6fc52df0ebef9ebb4b90b38a5f902e83fe1b135a70e23aed762e9710a12e")
+        for bad in ("short", "x" * 64, "pässwörd-long"):
+            with self.assertRaises(ValueError):
+                serverconf.derive_psk("Net", bad)
+
+    def test_validation(self):
+        ok = serverconf.validate({"wifi": {"enabled": True, "ssid": "Home Net", "country": "at"}})["wifi"]
+        self.assertEqual((ok["ssid"], ok["country"]), ("Home Net", "AT"))
+        for bad in ({"enabled": True, "ssid": ""}, {"enabled": True, "ssid": "x" * 33}, {"enabled": True, "ssid": "a\nb"},
+                    {"enabled": True, "ssid": "ok", "country": "Austria"}):
+            with self.assertRaises(ValueError, msg=str(bad)):
+                serverconf.validate({"wifi": bad})
+        serverconf.validate({"wifi": {"enabled": False}})          # off needs no name
+
+    def test_wpa_conf_is_injection_proof(self):
+        w = serverconf.validate({"wifi": {"enabled": True, "ssid": 'evil"} network={ psk=1', "hidden": True, "country": "DE"}})["wifi"]
+        txt = serverconf.render_wpa(w, "ab" * 32)
+        self.assertEqual(txt.count("network={"), 1)                 # SSID is hex: it can't open another block
+        self.assertIn("scan_ssid=1", txt)
+        self.assertIn("country=DE", txt)
+        self.assertEqual(serverconf.ssid_from_conf(txt), w["ssid"])
+        self.assertEqual(serverconf.psk_from_conf(txt), "ab" * 32)
+        self.assertIn("key_mgmt=NONE", serverconf.render_wpa(dict(w, open=True)))
+        with self.assertRaises(ValueError):
+            serverconf.render_wpa(w, None)
+
+    def test_interfaces_with_wifi(self):
+        c = serverconf.validate({"wifi": {"enabled": True, "ssid": "Home"}})
+        t = serverconf.render_network(c, "eth0", "wlan0")
+        self.assertIn("allow-hotplug eth0\niface eth0 inet dhcp", t)
+        self.assertIn("iface wlan0 inet dhcp\n    wpa-conf /etc/wpa_supplicant/ssc-wifi.conf", t)
+        st = serverconf.validate({"wifi": {"enabled": True, "ssid": "Home"}, "network": {"mode": "static", "address": "10.0.0.5/24", "gateway": "10.0.0.1"}})
+        self.assertIn("iface wlan0 inet static\n    address 10.0.0.5", serverconf.render_network(st, "eth0", "wlan0"))
+        self.assertNotIn("wpa-conf", serverconf.render_network(serverconf.validate({}), "eth0", "wlan0"))     # off: plain wired config
+        self.assertNotIn("wpa-conf", serverconf.render_network(c, "eth0", None))                            # no card: wired config
+
+    def test_scan_parser(self):
+        n = serverconf.parse_iw_scan(IW_SCAN)
+        self.assertEqual([(x["ssid"], x["secured"]) for x in n], [("HomeNet", True), ("Cafe Open", False)])
+        self.assertEqual(n[0]["signal_dbm"], -48.0)               # strongest access point per name; hidden/blank entries dropped
+
+    def _fake_root(self):
+        root = Path(self.d) / "root"
+        for n in ("eth0", "wlan0"):
+            (root / "sys/class/net" / n).mkdir(parents=True)
+        (root / "sys/class/net/wlan0/wireless").mkdir()
+        return root
+
+    def test_apply_writes_a_root_only_conf_and_consumes_the_staged_key(self):
+        import applycfg
+        root = self._fake_root()
+        seen = []
+
+        class R:
+            returncode, stderr, stdout = 0, "", ""
+        run = lambda c: seen.append(c) or R()
+        cfg = serverconf.validate({"wifi": {"enabled": True, "ssid": "Home", "country": "AT"}})
+        serverconf.stage_wifi_psk("Home", serverconf.derive_psk("Home", "correct horse"))
+        res = applycfg.apply(["network"], cfg, root, run)
+        self.assertTrue(res["ok"], res)
+        conf = root / "etc/wpa_supplicant/ssc-wifi.conf"
+        self.assertEqual(oct(conf.stat().st_mode & 0o777), "0o600")
+        self.assertEqual(serverconf.psk_from_conf(conf.read_text()), serverconf.derive_psk("Home", "correct horse"))
+        self.assertNotIn("correct horse", conf.read_text())
+        self.assertFalse((serverconf.state_dir() / "apply" / "wifi.psk").exists())
+        self.assertIn(["ifup", "wlan0"], seen)
+        self.assertIn("wpa-conf", (root / "etc/network/interfaces.d/ssc").read_text())
+        # same network again without a new password: the stored key is kept
+        res = applycfg.apply(["network"], serverconf.validate({"wifi": {"enabled": True, "ssid": "Home", "country": "DE"}}), root, run)
+        self.assertTrue(res["ok"], res)
+        self.assertIn("country=DE", conf.read_text())
+        # another network without a password: refused, nothing half-written
+        res = applycfg.apply(["network"], serverconf.validate({"wifi": {"enabled": True, "ssid": "Other"}}), root, run)
+        self.assertFalse(res["ok"])
+        self.assertIn("no password", res["failed"][0])
+        # turning Wi-Fi off removes the credentials file
+        applycfg.apply(["network"], serverconf.validate({}), root, run)
+        self.assertFalse(conf.exists())
+
+    def test_ssconfig_wifi_set_and_flags(self):
+        import ssconfig
+        ssconfig.addresses = lambda: []
+        os.environ["SSC_WIFI_PASSPHRASE"] = "correct horse"
+        try:
+            self.assertEqual(ssconfig.main(["wifi", "set", "Home", "--country=at", "--hidden"]), 0)
+        finally:
+            del os.environ["SSC_WIFI_PASSPHRASE"]
+        w = serverconf.load()["wifi"]
+        self.assertEqual((w["enabled"], w["ssid"], w["country"], w["hidden"]), (True, "Home", "AT", True))
+        self.assertNotIn("correct horse", serverconf.config_path().read_text())          # the passphrase is never in server.json
+        staged = json.loads((serverconf.state_dir() / "apply" / "wifi.psk").read_text())
+        self.assertEqual(staged["psk"], serverconf.derive_psk("Home", "correct horse"))
+        self.assertEqual(oct((serverconf.state_dir() / "apply" / "wifi.psk").stat().st_mode & 0o777), "0o600")
+        os.environ["SSC_WIFI_PASSPHRASE"] = "short"
+        try:
+            self.assertEqual(ssconfig.main(["wifi", "set", "Home"]), 1)
+        finally:
+            del os.environ["SSC_WIFI_PASSPHRASE"]
+        self.assertEqual(ssconfig.main(["wifi", "off"]), 0)
+        self.assertFalse(serverconf.load()["wifi"]["enabled"])
+
+    def test_installer_answers_with_wifi(self):
+        import install_plan as p
+        disks = [{"path": "/dev/sda", "size": 32 * 10 ** 9, "model": "", "removable": False}]
+        a = p.validate_answers({"password": "twelve-chars!", "wifi": {"ssid": "Home", "passphrase": "correct horse", "country": "at"}}, disks)
+        self.assertEqual(a["wifi"]["psk"], serverconf.derive_psk("Home", "correct horse"))
+        self.assertEqual(a["wifi"]["country"], "AT")
+        self.assertIsNone(p.validate_answers({"password": "twelve-chars!"}, disks)["wifi"])
+        with self.assertRaises(ValueError):
+            p.validate_answers({"password": "twelve-chars!", "wifi": {"ssid": "Home", "passphrase": "short"}}, disks)

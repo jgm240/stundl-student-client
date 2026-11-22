@@ -24,6 +24,7 @@ DEFAULTS = {
     "web": {"port": 8080, "bind": "0.0.0.0", "https": False, "session_hours": 12, "guest_passwordless": False},
     "links": {"enabled": True, "long": False, "port": 8766},
     "network": {"mode": "dhcp", "interface": "auto", "address": "", "gateway": "", "dns": [], "hostname": "ssc-server"},
+    "wifi": {"enabled": False, "ssid": "", "open": False, "hidden": False, "country": ""},
     "ssh": {"enabled": True, "port": 22, "permit_root": False, "password_auth": True, "allow_users": []},
     "sections": {"guest": ["today", "timetable", "homework", "exams", "plan", "changes"],
                  "user": list(SECTIONS)},
@@ -125,6 +126,17 @@ def validate(cfg):
     else:
         n["address"], n["gateway"], n["dns"] = "", "", []
 
+    wf = c["wifi"]
+    wf["enabled"], wf["open"], wf["hidden"] = _bool(wf["enabled"]), _bool(wf["open"]), _bool(wf["hidden"])
+    wf["ssid"] = str(wf["ssid"])
+    wf["country"] = str(wf["country"]).strip().upper()
+    if wf["country"] and not re.fullmatch(r"[A-Z]{2}", wf["country"]):
+        raise ValueError("Wi-Fi country: two letters, e.g. AT, DE, US")
+    if wf["enabled"]:
+        check_ssid(wf["ssid"])
+    elif wf["ssid"]:
+        check_ssid(wf["ssid"])
+
     s = c["ssh"]
     s["enabled"], s["permit_root"], s["password_auth"] = _bool(s["enabled"]), _bool(s["permit_root"]), _bool(s["password_auth"])
     s["port"] = _port(s["port"], "ssh")
@@ -200,18 +212,127 @@ def update(path, value):
     return save(c)
 
 
+# ------------------------------------------------------------------ Wi-Fi
+def check_ssid(ssid):
+    b = ssid.encode("utf-8", "strict")
+    if not 1 <= len(b) <= 32:
+        raise ValueError("Wi-Fi name (SSID): 1-32 bytes")
+    if any(ord(ch) < 32 or ord(ch) == 127 for ch in ssid):
+        raise ValueError("Wi-Fi name contains control characters")
+    return ssid
+
+
+def derive_psk(ssid, passphrase):
+    """WPA2-Personal key from name + passphrase (IEEE 802.11i: PBKDF2-HMAC-SHA1, 4096 rounds). Only this 64-hex key is
+    ever stored - the passphrase itself is not written anywhere."""
+    import hashlib
+    check_ssid(ssid)
+    if not 8 <= len(passphrase) <= 63 or any(ord(ch) < 32 or ord(ch) > 126 for ch in passphrase):
+        raise ValueError("Wi-Fi password: 8-63 printable ASCII characters")
+    return hashlib.pbkdf2_hmac("sha1", passphrase.encode("ascii"), ssid.encode("utf-8"), 4096, 32).hex()
+
+
+WPA_CONF_PATH = "/etc/wpa_supplicant/ssc-wifi.conf"
+
+
+def render_wpa(wifi, psk=None):
+    """wpa_supplicant.conf from a validated section. The SSID is written as hex, so no character in it can alter the file."""
+    lines = ["# Managed by ssconfig - changes are overwritten", "ctrl_interface=DIR=/run/wpa_supplicant GROUP=netdev", "update_config=0"]
+    if wifi["country"]:
+        lines.append(f"country={wifi['country']}")
+    lines += ["network={", f"    ssid={wifi['ssid'].encode('utf-8').hex()}"]
+    if wifi["hidden"]:
+        lines.append("    scan_ssid=1")
+    if wifi["open"]:
+        lines.append("    key_mgmt=NONE")
+    else:
+        if not psk or not re.fullmatch(r"[0-9a-f]{64}", psk):
+            raise ValueError("Wi-Fi key missing")
+        lines += ["    key_mgmt=WPA-PSK", f"    psk={psk}"]
+    lines.append("}")
+    return "\n".join(lines) + "\n"
+
+
+def psk_from_conf(text):
+    m = re.search(r"^\s*psk=([0-9a-f]{64})\s*$", text or "", re.M)
+    return m.group(1) if m else None
+
+
+def ssid_from_conf(text):
+    m = re.search(r"^\s*ssid=([0-9a-f]+)\s*$", text or "", re.M)
+    try:
+        return bytes.fromhex(m.group(1)).decode("utf-8") if m else None
+    except ValueError:
+        return None
+
+
+def stage_wifi_psk(ssid, psk):
+    """Hand a new key to the root helper: a 0600 file next to the apply request (consumed and deleted there)."""
+    d = state_dir() / "apply"
+    d.mkdir(parents=True, exist_ok=True)
+    tmp = d / ".wifi.tmp"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        json.dump({"ssid": ssid, "psk": psk}, f)
+    os.replace(tmp, d / "wifi.psk")
+
+
+def parse_iw_scan(text):
+    """`iw dev X scan` -> [{ssid, signal_dbm, secured}] strongest first, one entry per name, hidden networks skipped."""
+    nets, cur = {}, None
+    for line in (text or "").splitlines():
+        if line.startswith("BSS "):
+            cur = {"ssid": "", "signal": -100.0, "secured": False}
+            nets.setdefault(id(cur), cur)
+            continue
+        if cur is None:
+            continue
+        t = line.strip()
+        if t.startswith("SSID:"):
+            cur["ssid"] = t[5:].strip()
+        elif t.startswith("signal:"):
+            try:
+                cur["signal"] = float(t.split()[1])
+            except (IndexError, ValueError):
+                pass
+        elif t.startswith(("RSN:", "WPA:")) or "Privacy" in t:
+            cur["secured"] = True
+    best = {}
+    for n in nets.values():
+        raw = n["ssid"]
+        if not raw or "\\x00" in raw or raw.startswith("\\x"):
+            continue
+        if raw not in best or n["signal"] > best[raw]["signal_dbm"]:
+            best[raw] = {"ssid": raw, "signal_dbm": n["signal"], "secured": n["secured"]}
+    return sorted(best.values(), key=lambda n: -n["signal_dbm"])
+
+
 # ------------------------------------------------------------------ rendering (fixed templates, validated input only)
-def render_interfaces(net, iface):
-    head = "# Managed by ssconfig - changes are overwritten\n"
+def render_interfaces(net, iface, wpa_conf=None, head=True):
+    out = "# Managed by ssconfig - changes are overwritten\n" if head else ""
     if net["mode"] == "dhcp":
-        return head + f"auto {iface}\niface {iface} inet dhcp\n"
-    ip = ipaddress.IPv4Interface(net["address"])
-    out = head + f"auto {iface}\niface {iface} inet static\n    address {ip.ip}\n    netmask {ip.netmask}\n"
-    if net["gateway"]:
-        out += f"    gateway {net['gateway']}\n"
-    if net["dns"]:
-        out += f"    dns-nameservers {' '.join(net['dns'])}\n"
+        out += f"auto {iface}\niface {iface} inet dhcp\n"
+    else:
+        ip = ipaddress.IPv4Interface(net["address"])
+        out += f"auto {iface}\niface {iface} inet static\n    address {ip.ip}\n    netmask {ip.netmask}\n"
+        if net["gateway"]:
+            out += f"    gateway {net['gateway']}\n"
+        if net["dns"]:
+            out += f"    dns-nameservers {' '.join(net['dns'])}\n"
+    if wpa_conf:
+        out += f"    wpa-conf {wpa_conf}\n"
     return out
+
+
+def render_network(cfg, wired, wlan=None):
+    """With Wi-Fi on (and a wireless card present) the address settings go to the Wi-Fi interface and a wired port, if any,
+    just gets DHCP. Otherwise the settings go to the wired port as before."""
+    if cfg["wifi"]["enabled"] and wlan:
+        out = "# Managed by ssconfig - changes are overwritten\n"
+        if wired and wired != wlan:
+            out += f"allow-hotplug {wired}\niface {wired} inet dhcp\n\n"
+        return out + render_interfaces(cfg["network"], wlan, WPA_CONF_PATH, head=False)
+    return render_interfaces(cfg["network"], wired or wlan or "eth0")
 
 
 def render_sshd(ssh):

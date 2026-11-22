@@ -9,6 +9,7 @@
   ssconfig set <setting> <val>  change one setting     e.g.  ssconfig set links.long true
                                                              ssconfig set network.mode static
   ssconfig ip <addr/len> <gateway> [dns,dns]   fixed IP address       ssconfig dhcp   automatic address
+  ssconfig wifi scan|status|set <name> [--open] [--hidden] [--country=AT]|off   Wi-Fi
   ssconfig account add|list|passwd|role|disable|enable|delete ...
   ssconfig untis                set the WebUntis (Untis Mobile) key from a QR text
   ssconfig sync                 fetch data now
@@ -80,8 +81,10 @@ def apply_parts(parts):
 
 
 def changed(old, new):
-    return [k for k in ("network", "ssh", "firewall", "web", "links") if old[k] != new[k]] + \
-           (["firewall"] if (old["web"]["port"], old["links"]) != (new["web"]["port"], new["links"]) else [])
+    parts = [k for k in ("network", "ssh", "firewall", "web", "links") if old[k] != new[k]]
+    if old["wifi"] != new["wifi"] and "network" not in parts:
+        parts.append("network")
+    return parts + (["firewall"] if (old["web"]["port"], old["links"]) != (new["web"]["port"], new["links"]) else [])
 
 
 def set_setting(path, value):
@@ -175,6 +178,121 @@ def cmd_status(_=None):
     cmd_showip()
 
 
+# ------------------------------------------------------------------ Wi-Fi
+def wifi_iface():
+    import applycfg
+    return applycfg.wifi_interface()
+
+
+def wifi_scan():
+    """-> [{ssid, signal_dbm, secured}] (needs root and a wireless card)."""
+    ifc = wifi_iface()
+    if not ifc:
+        raise ValueError("no Wi-Fi card found in this machine")
+    subprocess.run(["ip", "link", "set", ifc, "up"], capture_output=True)
+    r = subprocess.run(["iw", "dev", ifc, "scan"], capture_output=True, text=True, timeout=30)
+    if r.returncode != 0:
+        raise ValueError("scan failed: " + (r.stderr or r.stdout).strip()[:150])
+    return serverconf.parse_iw_scan(r.stdout)
+
+
+def wifi_set(ssid, passphrase=None, open_net=False, hidden=False, country=None):
+    """Validate, stage the derived key for the root helper, save settings, apply. The passphrase itself is never stored."""
+    old = serverconf.load()
+    cfg = serverconf.load()
+    w = cfg["wifi"]
+    w.update(enabled=True, ssid=ssid, open=open_net, hidden=hidden)
+    if country:
+        w["country"] = country
+    if not open_net:
+        if not passphrase:
+            raise ValueError("a password is needed")
+        serverconf.stage_wifi_psk(ssid, serverconf.derive_psk(ssid, passphrase))
+    new = serverconf.save(cfg)
+    fix_owner()
+    apply_parts(sorted(set(changed(old, new) + ["network"])))
+    return new
+
+
+def cmd_wifi(args):
+    sub, rest = (args[0], args[1:]) if args else ("status", [])
+    try:
+        if sub == "scan":
+            nets = wifi_scan()
+            for n in nets:
+                print(f"{n['signal_dbm']:6.0f} dBm  {'secured' if n['secured'] else 'open   '}  {n['ssid']}")
+            return 0 if nets else 1
+        if sub == "set" and rest:
+            flags = [a for a in rest if a.startswith("--")]
+            vals = [a for a in rest if not a.startswith("--")]
+            country = next((f.split("=", 1)[1] for f in flags if f.startswith("--country=")), None)
+            op = "--open" in flags
+            pw = None if op else (os.environ.get("SSC_WIFI_PASSPHRASE") or getpass.getpass("Wi-Fi password: "))
+            wifi_set(vals[0], pw, op, "--hidden" in flags, country)
+            print("Wi-Fi saved.  Check:  ssconfig showip")
+            return 0
+        if sub == "off":
+            set_setting("wifi.enabled", "false")
+            return 0
+        if sub == "status":
+            w = serverconf.load()["wifi"]
+            ifc = wifi_iface()
+            print("Wi-Fi card :", ifc or "none found")
+            print("Wi-Fi      :", f"on, network '{w['ssid']}'" if w["enabled"] else "off")
+            if ifc:
+                r = subprocess.run(["iw", "dev", ifc, "link"], capture_output=True, text=True)
+                print((r.stdout or "").strip() or "not connected")
+            return 0
+    except ValueError as e:
+        print("Error:", e)
+        return 1
+    print("usage: ssconfig wifi scan | status | set <name> [--open] [--hidden] [--country=AT] | off")
+    return 2
+
+
+def menu_wifi():
+    ifc = wifi_iface()
+    if not ifc:
+        wt("--msgbox", "No Wi-Fi card was found in this machine.", "8", "54")
+        return
+    rc, ch = wt("--menu", "Wi-Fi", "13", "64", "4", "scan", "Find networks and connect", "hidden", "Connect to a hidden network", "off", "Turn Wi-Fi off", "status", "Status")
+    if rc:
+        return
+    if ch == "off":
+        set_setting("wifi.enabled", "false")
+        return
+    if ch == "status":
+        show("Wi-Fi", capture(cmd_wifi, ["status"]))
+        return
+    hidden = ch == "hidden"
+    if hidden:
+        rc, ssid = wt("--inputbox", "Network name (SSID)", "8", "60")
+        if rc:
+            return
+        secured = True
+    else:
+        wt("--infobox", "Searching...", "5", "30")
+        nets = wifi_scan()
+        if not nets:
+            wt("--msgbox", "No networks found.", "7", "40")
+            return
+        rows = []
+        for n in nets[:20]:
+            rows += [n["ssid"], f"{n['signal_dbm']:.0f} dBm {'secured' if n['secured'] else 'open'}"]
+        rc, ssid = wt("--menu", "Choose a network", "20", "64", "10", *rows)
+        if rc:
+            return
+        secured = next(n["secured"] for n in nets if n["ssid"] == ssid)
+    pw = None
+    if secured:
+        rc, pw = wt("--passwordbox", f"Password for {ssid}", "8", "60")
+        if rc:
+            return
+    rc, cc = wt("--inputbox", "Country code (two letters, e.g. AT, DE, US) - needed for 5 GHz", "9", "64", serverconf.load()["wifi"]["country"] or "")
+    wifi_set(ssid, pw, not secured, hidden, cc or None)
+    wt("--msgbox", "Saved. In a few seconds:  ssconfig showip", "8", "50")
+
+
 # ------------------------------------------------------------------ accounts
 def ask_password(prompt="Password: "):
     p1 = getpass.getpass(prompt)
@@ -260,8 +378,8 @@ def menu():
         print(__doc__)
         return 0
     while True:
-        rc, ch = wt("--title", "SSC Server", "--menu", "Configure this server", "20", "70", "11",
-                    "ip", "Show IP address and web address", "link", "Show the Parent link", "net", "Network (DHCP / fixed IP)",
+        rc, ch = wt("--title", "SSC Server", "--menu", "Configure this server", "21", "70", "12",
+                    "ip", "Show IP address and web address", "link", "Show the Parent link", "net", "Network (DHCP / fixed IP)", "wifi", "Wi-Fi",
                     "web", "Web port, HTTPS, long links", "acc", "Accounts", "ssh", "SSH settings", "untis", "WebUntis key",
                     "sync", "Fetch data now", "rot", "New Parent link", "status", "Status", "quit", "Leave")
         if rc != 0 or ch == "quit":
@@ -275,6 +393,8 @@ def menu():
                 show("Status", capture(cmd_status))
             elif ch == "net":
                 menu_net()
+            elif ch == "wifi":
+                menu_wifi()
             elif ch == "web":
                 menu_web()
             elif ch == "ssh":
@@ -433,6 +553,8 @@ def main(argv=None):
         if c == "set" and len(rest) == 2:
             set_setting(*rest)
             return 0
+        if c == "wifi":
+            return cmd_wifi(rest)
         if c == "dhcp":
             set_setting("network.mode", "dhcp")
             return 0

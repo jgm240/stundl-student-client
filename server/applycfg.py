@@ -12,6 +12,8 @@ from pathlib import Path
 
 import serverconf
 
+WPA_REL = "etc/wpa_supplicant/ssc-wifi.conf"
+
 
 def _run(cmd, check=False):
     return subprocess.run(cmd, capture_output=True, text=True, timeout=60, check=check)
@@ -26,13 +28,46 @@ def _write(root, rel, text, mode=0o644):
     os.replace(tmp, p)
 
 
-def default_interface(root):
+def _interfaces(root):
     d = root / "sys/class/net"
     try:
         names = sorted(n.name for n in d.iterdir() if n.name != "lo" and not n.name.startswith(("docker", "veth", "br-", "virbr")))
     except OSError:
-        names = []
-    return names[0] if names else "eth0"
+        return [], []
+    wireless = [n for n in names if (d / n / "wireless").exists() or (d / n / "phy80211").exists()]
+    return [n for n in names if n not in wireless], wireless
+
+
+def default_interface(root):
+    wired, wireless = _interfaces(root)
+    return (wired or wireless or ["eth0"])[0]
+
+
+def wifi_interface(root=None):
+    return (_interfaces(root or serverconf.system_root())[1] or [None])[0]
+
+
+def _apply_wifi(cfg, root, wlan):
+    """Writes /etc/wpa_supplicant/ssc-wifi.conf (root-only). The key comes from the staged file (new password) or, when the
+    network name is unchanged, from the file already there. Returns a note."""
+    wf = cfg["wifi"]
+    path = root / WPA_REL
+    staged = serverconf.state_dir() / "apply" / "wifi.psk"
+    psk = None
+    if not wf["open"]:
+        try:
+            st = json.loads(staged.read_text())
+            if st.get("ssid") == wf["ssid"]:
+                psk = st.get("psk")
+        except (OSError, ValueError):
+            pass
+        if not psk and path.exists() and serverconf.ssid_from_conf(path.read_text()) == wf["ssid"]:
+            psk = serverconf.psk_from_conf(path.read_text())
+        if not psk:
+            raise RuntimeError(f"wifi: no password known for '{wf['ssid']}' - set it again (ssconfig wifi set)")
+    _write(root, WPA_REL, serverconf.render_wpa(wf, psk), 0o600)
+    staged.unlink(missing_ok=True)
+    return f"Wi-Fi '{wf['ssid']}' on {wlan}"
 
 
 def apply_part(part, cfg, root=None, run=_run):
@@ -40,8 +75,17 @@ def apply_part(part, cfg, root=None, run=_run):
     root = root or serverconf.system_root()
     if part == "network":
         n = cfg["network"]
-        iface = default_interface(root) if n["interface"] == "auto" else n["interface"]
-        _write(root, "etc/network/interfaces.d/ssc", serverconf.render_interfaces(n, iface))
+        wired, wireless = _interfaces(root)
+        wlan = wireless[0] if wireless else None
+        notes = []
+        if cfg["wifi"]["enabled"] and not wlan:
+            notes.append("Wi-Fi is on but no wireless card was found; using the wired port")
+        iface = (wired[0] if wired else (wlan or "eth0")) if n["interface"] == "auto" else n["interface"]
+        if cfg["wifi"]["enabled"] and wlan:
+            notes.append(_apply_wifi(cfg, root, wlan))
+        elif (root / WPA_REL).exists() and not cfg["wifi"]["enabled"]:
+            (root / WPA_REL).unlink()
+        _write(root, "etc/network/interfaces.d/ssc", serverconf.render_network(cfg, iface, wlan))
         _write(root, "etc/hostname", n["hostname"] + "\n")
         hosts = root / "etc/hosts"
         try:
@@ -50,11 +94,14 @@ def apply_part(part, cfg, root=None, run=_run):
             lines = ["127.0.0.1\tlocalhost"]
         _write(root, "etc/hosts", "\n".join(lines + [f"127.0.1.1\t{n['hostname']}"]) + "\n")
         run(["hostname", n["hostname"]])
-        run(["ifdown", "--force", iface])
-        r = run(["ifup", iface])
-        if r.returncode != 0:
-            raise RuntimeError("network: ifup failed: " + (r.stderr or r.stdout).strip()[:200])
-        return [f"network applied on {iface} ({n['mode']})"]
+        ups = [x for x in dict.fromkeys([iface, wlan if cfg["wifi"]["enabled"] else None]) if x]
+        for x in ups:
+            run(["ifdown", "--force", x])
+        for x in ups:
+            r = run(["ifup", x])
+            if r.returncode != 0:
+                raise RuntimeError(f"network: ifup {x} failed: " + (r.stderr or r.stdout).strip()[:200])
+        return notes + [f"network applied on {', '.join(ups)} ({n['mode']})"]
     if part == "ssh":
         s = cfg["ssh"]
         path = "etc/ssh/sshd_config.d/ssc.conf"

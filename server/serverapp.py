@@ -58,6 +58,14 @@ def apply_result():
         return None
 
 
+def _wifi_card():
+    try:
+        import applycfg
+        return applycfg.wifi_interface()
+    except Exception:
+        return None
+
+
 PARTS = {"network": ("network",), "ssh": ("ssh",), "firewall": ("firewall",), "web": ("web",), "links": ("links",)}
 
 
@@ -66,6 +74,8 @@ def changed_parts(old, new):
     for k in ("network", "ssh", "firewall", "web", "links"):
         if old[k] != new[k]:
             parts.append(k)
+    if old["wifi"] != new["wifi"] and "network" not in parts:
+        parts.append("network")
     if old["web"]["port"] != new["web"]["port"] or old["links"] != new["links"]:
         parts.append("firewall")
     return parts
@@ -199,7 +209,8 @@ def make_handler():
                 return self.j(200, {"version": VERSION, "uptime": int(time.time() - START), "addresses": addrs,
                                     "urls": serverconf.server_urls(cfg, addrs), "hostname": cfg["network"]["hostname"], "links": links,
                                     "accounts": auth.accounts(), "untis": untis_direct.describe(), "synced_at": state["synced_at"],
-                                    "apply": apply_result(), "sync": ssc.SYNC})
+                                    "apply": apply_result(), "sync": ssc.SYNC,
+                                    "wifi_card": _wifi_card()})
             if u.path == "/api/admin/config":
                 return self.j(200, cfg)
             if u.path == "/api/admin/audit":
@@ -226,6 +237,26 @@ def make_handler():
                         request_apply(parts)
                     auth.audit(auth.db(), who, "settings-changed", ",".join(parts) or "no system change", self.ip())
                     return self.j(200, {"config": new, "apply": parts})
+                if u.path == "/api/admin/wifi":
+                    old = self.cfg()
+                    cfg = json.loads(json.dumps(old))
+                    w = cfg["wifi"]
+                    w["enabled"] = bool(b.get("enabled", True))
+                    if w["enabled"]:
+                        ssid = str(b.get("ssid", w["ssid"]))
+                        w.update(ssid=ssid, open=bool(b.get("open")), hidden=bool(b.get("hidden")))
+                        if b.get("country") is not None:
+                            w["country"] = str(b.get("country", ""))
+                        pw = str(b.get("passphrase", ""))
+                        if not w["open"]:
+                            if pw:
+                                serverconf.stage_wifi_psk(ssid, serverconf.derive_psk(ssid, pw))
+                            elif old["wifi"]["ssid"] != ssid or old["wifi"]["open"]:
+                                raise ValueError("enter the Wi-Fi password for this network")
+                    new = serverconf.save(cfg)
+                    request_apply(["network"])
+                    auth.audit(auth.db(), who, "wifi-changed", new["wifi"]["ssid"] if new["wifi"]["enabled"] else "off", self.ip())
+                    return self.j(200, {"config": new, "apply": ["network"]})
                 if u.path == "/api/admin/accounts":
                     auth.create(str(b.get("name", "")).strip().lower(), str(b.get("password", "")), str(b.get("role", "")), who=who)
                 elif u.path == "/api/admin/accounts/delete":

@@ -113,6 +113,8 @@ def install(ans, run, root=TARGET, efi=None, a=None):
         state = str(root / "var/lib/ssc")
         env = {"SSC_DATA_DIR": state, "SSC_VAULT": "file", "SSC_NEW_PASSWORD": ans["password"]}
         cfg = {"network": ans["network"], "ssh": {"enabled": ans["ssh"]}}
+        if ans.get("wifi"):
+            cfg["wifi"] = {k: v for k, v in ans["wifi"].items() if k != "psk"}
         run([sys.executable, "-c", "import sys,json;sys.path.insert(0,sys.argv[1]);import serverconf;serverconf.save(json.loads(sys.argv[2]))",
              str(HERE), json.dumps(cfg)], env=env)
         run([sys.executable, str(HERE / "ssconfig.py"), "account", "add", ans["admin"], "admin"], env=env)
@@ -123,6 +125,8 @@ def install(ans, run, root=TARGET, efi=None, a=None):
         full = serverconf.validate(cfg)
         noop = lambda c: subprocess.CompletedProcess(c, 0, "", "")
         if not run.dry:
+            if ans.get("wifi") and ans["wifi"].get("psk"):
+                serverconf.stage_wifi_psk(ans["wifi"]["ssid"], ans["wifi"]["psk"])
             for part in ("network", "ssh", "firewall"):
                 applycfg.apply_part(part, full, root, noop)
         # Linux login account (console + SSH): same name and password as the web admin
@@ -194,6 +198,12 @@ def ask(disks):
         rc, gw = wt("--inputbox", "Gateway (your router)", "8", "60")
         rc, dns = wt("--inputbox", "DNS server(s), separated by comma", "8", "60", gw)
         a["network"].update(address=addr, gateway=gw, dns=dns)
+    if any((Path("/sys/class/net") / n / "wireless").exists() for n in os.listdir("/sys/class/net")):
+        if wt("--yesno", "A Wi-Fi card was found. Connect this server to a Wi-Fi network?", "8", "64")[0] == 0:
+            rc, ssid = wt("--inputbox", "Wi-Fi network name (SSID)", "8", "60")
+            rc, pw = wt("--passwordbox", "Wi-Fi password (leave empty for an open network)", "8", "60")
+            rc, cc = wt("--inputbox", "Country code (two letters, e.g. AT, DE, US)", "8", "60", "AT")
+            a["wifi"] = {"ssid": ssid, "passphrase": pw, "open": not pw, "country": cc}
     rc, a["timezone"] = wt("--inputbox", "Time zone (e.g. Europe/Vienna, UTC)", "8", "60", "UTC")
     rc, a["keymap"] = wt("--inputbox", "Keyboard layout (us, de, at, fr, ...)", "8", "60", "us")
     a["ssh"] = wt("--yesno", "Turn on SSH (remote login)?", "8", "50")[0] == 0

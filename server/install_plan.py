@@ -92,6 +92,12 @@ def validate_answers(a, disks):
         raise ValueError(str(e))
     net = a.get("network", {})
     out["network"] = serverconf.validate({"network": {**net, "hostname": out["hostname"]}})["network"]
+    out["wifi"] = None
+    wf = a.get("wifi")
+    if wf and wf.get("ssid"):
+        w = serverconf.validate({"wifi": {"enabled": True, "ssid": wf["ssid"], "open": bool(wf.get("open")), "hidden": bool(wf.get("hidden")),
+                                          "country": wf.get("country", "")}})["wifi"]
+        out["wifi"] = dict(w, psk=None if w["open"] else serverconf.derive_psk(w["ssid"], str(wf.get("passphrase", ""))))
     out["timezone"] = a.get("timezone", "UTC")
     if not re.match(r"^[A-Za-z0-9_+./-]{1,40}$", out["timezone"]) or ".." in out["timezone"]:
         raise ValueError("timezone looks invalid")

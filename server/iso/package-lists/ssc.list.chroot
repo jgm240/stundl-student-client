@@ -23,3 +23,13 @@ console-setup
 keyboard-configuration
 tzdata
 systemd-sysv
+wpasupplicant
+iw
+wireless-regdb
+rfkill
+firmware-iwlwifi
+firmware-atheros
+firmware-realtek
+firmware-brcm80211
+firmware-ralink
+firmware-misc-nonfree

@@ -5,6 +5,8 @@ install -d -o ssc -g ssc -m 750 /var/lib/ssc
 systemctl enable ssc-server.service ssc-apply.path ssc-banner.service ssc-sync.timer ssc-live-console.service ssc-autoinstall.service nftables.service ssh.service
 # the console of the live medium belongs to the SSC menu
 systemctl disable getty@tty1.service 2>/dev/null || true
+# Wi-Fi is started by ifupdown (wpa-conf); the standalone wpa_supplicant service would fight with it
+systemctl mask wpa_supplicant.service 2>/dev/null || true
 # fresh machine-id and host keys are made on first boot / by the installer
 rm -f /etc/ssh/ssh_host_* /etc/machine-id
 touch /etc/machine-id

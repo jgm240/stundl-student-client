@@ -23,9 +23,21 @@ ISO for 64-bit (`amd64`) and 32-bit (`i386`, 686-pae) PCs. It can run live from 
 (`{"disk":"auto","hostname":"ssc","admin":"admin","password":"...","timezone":"UTC","keymap":"us","ssh":true,"network":{"mode":"dhcp"}}`);
 the installer runs by itself and powers off when done.
 
+## Wi-Fi
+The image includes `wpa_supplicant` and firmware for common Wi-Fi chips (Intel, Atheros, Realtek, Broadcom, Ralink; Debian's
+`non-free-firmware` packages, redistributed under their own licences). Chips that need other firmware won't work out of the box.
+* **Console:** `ssconfig wifi scan`, `ssconfig wifi set "My Network" --country=AT` (asks for the password; add `--hidden` or `--open`),
+  `ssconfig wifi status`, `ssconfig wifi off` - or the **Wi-Fi** entry in the `ssconfig` menu, which lists networks to pick from.
+* **Admin panel:** Network tab -> Wi-Fi. (No network list there: type the name.)
+* **Installer:** if a Wi-Fi card is found it offers to connect; unattended installs take `"wifi":{"ssid":"..","passphrase":"..","country":"AT"}`.
+* With Wi-Fi on, the address settings (DHCP or fixed IP) apply to the Wi-Fi interface and a network cable, if plugged in, uses DHCP.
+* The password is never stored: only the derived WPA2 key goes into a root-only file (`/etc/wpa_supplicant/ssc-wifi.conf`).
+  Set the country code, or 5 GHz networks may not be found. WPA2-Personal and open networks only (no WPA3-only or enterprise/802.1X).
+
 ## Notes and limits
 * Beta software. The ISOs are tested in QEMU (boot, unattended install, first boot, web login), not on a wide range of real hardware.
 * Secure Boot is not supported (the ISO is not signed with a Microsoft-trusted key); turn it off for the install.
 * The WebUntis mobile interface is undocumented and can change; the server then just keeps showing its last data.
+* Wi-Fi is covered by unit tests (key derivation against the IEEE test vector, generated files, validation) but the CI tests run without a Wi-Fi card, so it has **not** been tried on real Wi-Fi hardware.
 * The live medium has no SSH and no network services configured until you set it up or install.
 * HTTPS: put `cert.pem` and `key.pem` in `/etc/ssc/tls/`, then `ssconfig set web.https true`.
