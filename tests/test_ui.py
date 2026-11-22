@@ -148,7 +148,7 @@ class PageTests(unittest.TestCase):
         self.assertNotIn("SSC_CLASSIC=true", core.load_page(ROOT / "server/login.html", classic=True))
 
     def test_classic_runtime_keeps_its_own_design(self):
-        self.assertIn("root.SSC_CLASSIC) return;", (ROOT / "ui.js").read_text())
+        self.assertIn("root.SSC_CLASSIC) return;", (ROOT / "ui.js").read_text(encoding="utf-8"))
 
     def test_clean_prefs(self):
         self.assertEqual(core.clean_prefs({"lang": "de", "theme": "dark", "palette": "ocean", "accent": "teal", "evil": "<script>"}),
