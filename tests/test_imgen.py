@@ -227,7 +227,8 @@ class ImgenTests(unittest.TestCase):
         d = Path(tempfile.mkdtemp())
         rc, out, _ = self.run_cli("--user", "anna", "--address", "10.0.0.5:8080", "--password-stdin", "-o", str(d / "a.png"), stdin="Secret-1\n")
         self.assertEqual(rc, 0, out)
-        self.assertEqual(stat.S_IMODE((d / "a.png").stat().st_mode), 0o600)         # holds a password: owner only
+        if os.name == "posix":                                                      # (Windows has no Unix permission bits)
+            self.assertEqual(stat.S_IMODE((d / "a.png").stat().st_mode), 0o600)     # holds a password: owner only
         self.assertNotIn("Secret-1", out)                                           # the password is never echoed
         for ext, magic in ((".pdf", b"%PDF"), (".jpg", b"\xff\xd8")):
             rc, _, _ = self.run_cli("--user", "a", "--address", "10.0.0.5:8080", "--password-stdin", "--notes", "hi", "-o", str(d / ("a" + ext)), stdin="pw1234\n")
