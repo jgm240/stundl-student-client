@@ -81,15 +81,20 @@ test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18080/data.json)
 test "$(curl -s -o /dev/null -w '%{http_code}' -c $W/jar2 -H 'Content-Type: application/json' -d '{"name":"gast","password":"guestpass"}' http://127.0.0.1:18080/api/login)" = 200
 echo "WEB + AUTH OK (admin and the account from the SSC Install file)"
 # the console: a login must exist on tty1 (getty), and with auto-login the admin must really be logged in there
-curl -fsS -b $W/jar -o $W/status.json http://127.0.0.1:18080/api/admin/status
-python3 - "$W/status.json" "${AUTOLOGIN:-false}" <<'PY'
-import json, sys
-c = json.load(open(sys.argv[1]))["console"]
+python3 - "$W/jar" "${AUTOLOGIN:-false}" <<'PY'
+import json, subprocess, sys, time
+for attempt in range(30):          # the web service is up before the console login is: give the auto-login up to a minute
+    out = subprocess.run(["curl", "-fsS", "-b", sys.argv[1], "http://127.0.0.1:18080/api/admin/status"], capture_output=True, text=True).stdout
+    c = json.loads(out)["console"]
+    if sys.argv[2] == "true":
+        ok = any(x["user"] == "admin" and x["tty"] == "tty1" for x in c["logged_in"])
+    else:
+        ok = c["getty"] == "active"
+    if ok:
+        break
+    time.sleep(2)
 print("console:", c)
-if sys.argv[2] == "true":
-    ok = any(x["user"] == "admin" and x["tty"] == "tty1" for x in c["logged_in"])
-    sys.exit(0 if ok else 1)
-sys.exit(0 if c["getty"] == "active" else 1)
+sys.exit(0 if ok else 1)
 PY
 echo "CONSOLE LOGIN OK"
 if grep -qi "unpacking failed\|Kernel panic" $W/boot.log; then echo "INSTALLED BOOT HAD INITRAMFS/PANIC ERRORS"; exit 1; fi
