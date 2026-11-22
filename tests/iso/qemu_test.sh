@@ -40,10 +40,23 @@ fi
 
 # ---- install mode
 qemu-img create -f qcow2 $W/disk.qcow2 8G >/dev/null
-mkdir $W/ans; cat > $W/ans/answers.json <<J
-{"disk":"auto","hostname":"ssc-ci","admin":"admin","password":"$PW","timezone":"UTC","keymap":"us","ssh":true,"autologin":${AUTOLOGIN:-false},"network":{"mode":"dhcp"}}
+mkdir $W/ans; cat > $W/ans/autoinstall.ssci <<J
+# written by the CI test: a complete SSC Install file (nothing is asked)
+erase = yes
+wait = 2
+disk = auto
+hostname = ssc-ci
+admin = admin
+password = $PW
+timezone = UTC
+keymap = us
+ssh = yes
+autologin = ${AUTOLOGIN:-false}
+network = dhcp
+account.gast = guest:guestpass
+power.lid = ignore
 J
-truncate -s 16M $W/ans.img; mkfs.ext4 -q -F -L SSCANS -d $W/ans $W/ans.img
+truncate -s 16M $W/ans.img; mkfs.ext4 -q -F -L STICK -d $W/ans $W/ans.img
 BIOSARG=""; [ "${UEFI:-0}" = 1 ] && BIOSARG="-bios /usr/share/ovmf/OVMF.fd"
 echo "== phase 1: install"
 timeout $((1500*SLOW)) $Q $ACCEL -m 1024 $BIOSARG -cdrom "$ISO" -boot d -drive file=$W/disk.qcow2,if=virtio,format=qcow2 \
@@ -65,7 +78,8 @@ curl -fsS -b $W/jar -o $W/me.json http://127.0.0.1:18080/api/me; grep -q '"admin
 curl -fsS -b $W/jar -o $W/admin.html http://127.0.0.1:18080/admin; grep -qi "admin" $W/admin.html
 test "$(curl -s -o /dev/null -w '%{http_code}' -H 'Content-Type: application/json' -d '{"name":"admin","password":"nope-nope-nope"}' http://127.0.0.1:18080/api/login)" = 401
 test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18080/data.json)" = 401
-echo "WEB + AUTH OK"
+test "$(curl -s -o /dev/null -w '%{http_code}' -c $W/jar2 -H 'Content-Type: application/json' -d '{"name":"gast","password":"guestpass"}' http://127.0.0.1:18080/api/login)" = 200
+echo "WEB + AUTH OK (admin and the account from the SSC Install file)"
 # the console: a login must exist on tty1 (getty), and with auto-login the admin must really be logged in there
 curl -fsS -b $W/jar -o $W/status.json http://127.0.0.1:18080/api/admin/status
 python3 - "$W/status.json" "${AUTOLOGIN:-false}" <<'PY'

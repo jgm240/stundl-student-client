@@ -19,9 +19,13 @@ ISO for 64-bit (`amd64`) and 32-bit (`i386`, 686-pae) PCs. It can run live from 
 5. Open `http://<address>:8080/`, sign in as the administrator, open **Admin panel -> WebUntis** and paste the Untis Mobile QR text
    (WebUntis > Profile > Access > *Untis Mobile*).
 
-**Unattended install:** attach a small disk labelled `SSCANS` containing `answers.json`
-(`{"disk":"auto","hostname":"ssc","admin":"admin","password":"...","timezone":"UTC","keymap":"us","ssh":true,"network":{"mode":"dhcp"}}`);
-the installer runs by itself and powers off when done.
+**Unattended install (`autoinstall.ssci`):** put a plain-text file called `autoinstall.ssci` on a USB stick - or any attached drive - and boot the machine from the installer. It finds the file by itself (it looks at every attached drive, read-only), and installs with the settings in it. **Settings you leave out are asked on screen, like in the normal installer**; add `ask = no` to use defaults instead, fully unattended. Make the file with `sscigen` (below) or copy `autoinstall.ssci.example` from the installer stick.
+* **Safety:** the disk is only erased if the file says `erase = yes` (or you type ERASE when it asks); the drive the file came from is never erased; there is a countdown (`wait = 15` seconds) before an unattended install changes anything - power off to cancel; more than one file on different drives is an error; add `ssc.noautoinstall` to the kernel line to switch the feature off.
+* **It's data, not code:** the file is plain `key = value` text (JSON works too). Nothing in it is executed, unknown settings are errors with the line number, and everything is checked before a disk is touched.
+* **It can set**: the installer questions (disk, hostname, admin, password, time zone, keyboard, SSH, auto-login, network/static IP, Wi-Fi), extra accounts (`account.anna = user:password`), the WebUntis key (`untis = untis://...`), and any server setting as `section.key = value` (`power.lid`, `schedule.enabled`, `links.long`, ...). The file holds passwords in clear text: keep the stick private.
+
+## sscigen - write an `autoinstall.ssci` by answering the installer's questions
+`sscigen` (on the installer, or `./sscigen` from the repository - also on a Mac or in WSL) asks the same questions as the installer, with the same checks, and writes the file instead of installing: `sscigen -o /Volumes/USB/autoinstall.ssci`. `sscigen --edit old.ssci` keeps what a file already says and asks only the rest, `sscigen --check file.ssci` tells you whether the installer will accept a file. With `whiptail` installed it looks like the installer; otherwise it uses plain prompts.
 
 ## Old laptops as servers (lid closed)
 By default closing the lid does **nothing** - the machine keeps running - and it never suspends or hibernates (the sleep keys and idle timeouts are ignored too). This is the default of the image (live and installed).

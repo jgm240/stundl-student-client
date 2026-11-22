@@ -1,14 +1,21 @@
 [Unit]
-Description=Unattended SSC Server installation (only when a disk labelled SSCANS is attached)
+Description=SSC Server autoinstall (only when an autoinstall.ssci is found on the installer or another attached drive)
 ConditionPathExists=/run/live/medium
-ConditionPathExists=/dev/disk/by-label/SSCANS
-After=local-fs.target systemd-udev-settle.service
+ConditionKernelCommandLine=!ssc.noautoinstall
+After=local-fs.target systemd-udev-settle.service systemd-user-sessions.service
 Before=ssc-live-console.service
 
 [Service]
 Type=oneshot
-StandardOutput=journal+console
-StandardError=journal+console
+TimeoutStartSec=infinity
+SuccessExitStatus=3
+Environment=TERM=linux
+StandardInput=tty
+StandardOutput=tty
+StandardError=tty
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
 ExecStart=/usr/local/bin/ssc-install --auto
 
 [Install]

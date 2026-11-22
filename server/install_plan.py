@@ -106,4 +106,37 @@ def validate_answers(a, disks):
         raise ValueError("keymap looks invalid")
     out["ssh"] = bool(a.get("ssh", True))
     out["autologin"] = bool(a.get("autologin", False))
+    # everything else from an SSC Install file is checked now, before any disk is touched
+    base = {"network": out["network"], "ssh": {"enabled": out["ssh"]}}
+    if out["wifi"]:
+        base["wifi"] = {k: v for k, v in out["wifi"].items() if k != "psk"}
+    settings = a.get("settings") or {}
+    merged = serverconf.merge(json.loads(json.dumps(base)), json.loads(json.dumps(settings)))
+    if out["autologin"] and not (merged.get("console") or {}).get("autologin_user"):
+        merged["console"] = {"autologin_user": out["admin"]}
+    out["settings"] = serverconf.validate(merged)
+    cu = out["settings"]["console"]["autologin_user"]
+    if cu and cu != out["admin"]:
+        raise ValueError(f"console auto-login user '{cu}': on a fresh install only the admin account ('{out['admin']}') exists as a Linux login")
+    accounts, seen = [], {out["admin"]}
+    for name, role, pw in a.get("accounts") or []:
+        name = str(name).strip().lower()
+        try:
+            if role not in auth.ROLES:
+                raise auth.AuthError("role must be guest, user or admin")
+            auth._check_name(name)
+            auth._check_password(role, pw)
+            if name in seen:
+                raise auth.AuthError("that name is used twice")
+        except auth.AuthError as e:
+            raise ValueError(f"account {name}: {e}")
+        seen.add(name)
+        accounts.append((name, role, pw))
+    out["accounts"] = accounts
+    out["untis"] = None
+    if a.get("untis"):
+        import untis_direct
+        out["untis"] = untis_direct.parse_qr(a["untis"])
+        if not out["untis"]:
+            raise ValueError("untis: " + untis_direct.explain_qr(a["untis"]))
     return out

@@ -14,6 +14,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -23,14 +24,28 @@ sys.path.insert(0, str(HERE.parent))
 os.environ.setdefault("SSC_VAULT", "file")
 
 import install_plan as plan  # noqa: E402
+import qa  # noqa: E402
+import serverconf  # noqa: E402
+import ssci_file  # noqa: E402
 
 TARGET = Path("/target")
 SOURCE = "/run/live/rootfs/filesystem.squashfs/"
 
 
+def _log(m):
+    """To the screen this program runs on, and also to the system console (the serial console in a VM) when those differ."""
+    print(m, flush=True)
+    try:
+        if os.ttyname(1) != "/dev/console":
+            with open("/dev/console", "w") as c:
+                c.write(m + "\n")
+    except OSError:
+        pass
+
+
 class Runner:
-    def __init__(self, dry=False, log=lambda m: print(m, flush=True)):
-        self.dry, self.log = dry, log
+    def __init__(self, dry=False, log=None):
+        self.dry, self.log = dry, log or _log
 
     def __call__(self, cmd, check=True, input=None, env=None):
         self.log("$ " + " ".join(cmd))
@@ -115,37 +130,43 @@ def install(ans, run, root=TARGET, efi=None, a=None):
             (root / "etc/default/keyboard").write_text(f'XKBMODEL="pc105"\nXKBLAYOUT="{ans["keymap"]}"\nBACKSPACE="guess"\n')
         ch("sh", "-c", "rm -f /etc/machine-id /var/lib/dbus/machine-id /etc/ssh/ssh_host_*; systemd-machine-id-setup; "
                        "dpkg-reconfigure -f noninteractive openssh-server")
-        # SSC state: settings + the admin account, created with the real code against the target's state directory
+        # SSC state: the validated settings + the accounts, created with the real code against the target's state directory
         state = str(root / "var/lib/ssc")
         env = {"SSC_DATA_DIR": state, "SSC_VAULT": "file", "SSC_NEW_PASSWORD": ans["password"]}
-        cfg = {"network": ans["network"], "ssh": {"enabled": ans["ssh"]}}
+        save = "import sys,json;sys.path.insert(0,sys.argv[1]);import serverconf;serverconf.save(json.loads(sys.argv[2]))"
+        cfg = json.loads(json.dumps(ans["settings"]))
         if ans.get("wifi"):
             cfg["wifi"] = {k: v for k, v in ans["wifi"].items() if k != "psk"}
-        run([sys.executable, "-c", "import sys,json;sys.path.insert(0,sys.argv[1]);import serverconf;serverconf.save(json.loads(sys.argv[2]))",
-             str(HERE), json.dumps(cfg)], env=env)
+        run([sys.executable, "-c", save, str(HERE), json.dumps(cfg)], env=env)
         run([sys.executable, str(HERE / "ssconfig.py"), "account", "add", ans["admin"], "admin"], env=env)
+        for name, role, pw in ans.get("accounts", []):
+            run([sys.executable, str(HERE / "ssconfig.py"), "account", "add", name, role], env={**env, "SSC_NEW_PASSWORD": pw})
+        if ans.get("untis"):               # the WebUntis key goes straight into the new server's private store
+            run([sys.executable, "-c", "import sys,json;sys.path.insert(0,sys.argv[1]);sys.path.insert(0,sys.argv[2]);import untis_direct,core;"
+                 "untis_direct.save_credentials(json.loads(sys.argv[3]));core.save_config({**core.config(),'sync_mode':'direct'})",
+                 str(HERE.parent), str(HERE), json.dumps(ans["untis"])], env=env)
         ch("chown", "-R", "ssc:ssc", "/var/lib/ssc")
         # system files from the same validated settings (templates only)
         import applycfg
-        import serverconf
         full = serverconf.validate(cfg)
         noop = lambda c: subprocess.CompletedProcess(c, 0, "", "")
+        parts = ["network", "ssh", "firewall", "power"] + (["schedule"] if full["schedule"]["enabled"] else [])
         if not run.dry:
             if ans.get("wifi") and ans["wifi"].get("psk"):
                 serverconf.stage_wifi_psk(ans["wifi"]["ssid"], ans["wifi"]["psk"])
-            for part in ("network", "ssh", "firewall"):
+            for part in parts[:3]:
                 applycfg.apply_part(part, full, root, noop)
         # Linux login account (console + SSH): same name and password as the web admin
         ch("useradd", "-m", "-s", "/bin/bash", "-G", "sudo", ans["admin"])
         ch("chpasswd", input=f"{ans['admin']}:{ans['password']}\n")
         ch("passwd", "-l", "root")
-        if ans.get("autologin"):
-            full2 = serverconf.validate({**cfg, "console": {"autologin_user": ans["admin"]}})
-            run([sys.executable, "-c", "import sys,json;sys.path.insert(0,sys.argv[1]);import serverconf;serverconf.save(json.loads(sys.argv[2]))",
-                 str(HERE), json.dumps({**cfg, "console": {"autologin_user": ans["admin"]}})], env=env)
-            if not run.dry:
-                applycfg.apply_part("console", full2, root, noop)
-            ch("chown", "-R", "ssc:ssc", "/var/lib/ssc")      # the settings file was rewritten as root
+        if not run.dry:                    # these need the Linux login account (console auto-login) or the target's own /sys (RTC)
+            for part in parts[3:] + (["console"] if full["console"]["autologin_user"] else []):
+                applycfg.apply_part(part, full, root, noop)
+        if full["schedule"]["enabled"]:
+            ch("systemctl", "enable", "ssc-sleep.timer", *(["ssc-wake.timer"] if full["schedule"]["mode"] == "quiet" else []), check=False)
+        if not full["power"]["block_sleep"]:
+            ch("systemctl", "unmask", *serverconf.SLEEP_TARGETS, check=False)
         ch("systemctl", "enable", "ssc-server", "ssc-apply.path", "ssc-banner", "nftables", "ssh", "ssc-sync.timer", check=False)
 
         # live-medium-only units must not exist on the installed system (they are skipped there, but the menu unit's old Conflicts=
@@ -198,53 +219,32 @@ def wt(*args):
     return r.returncode, r.stderr.strip()
 
 
-def ask(disks):
-    a = {}
-    rows = []
-    for d in disks:
-        rows += [d["path"], f"{plan.human(d['size'])}  {d['model']}{'  (removable)' if d['removable'] else ''}"]
-    if not rows:
-        wt("--msgbox", "No disk found that is large enough (4 GB or more).", "9", "60")
+def has_wifi_card():
+    try:
+        return any((Path("/sys/class/net") / n / "wireless").exists() for n in os.listdir("/sys/class/net"))
+    except OSError:
+        return False
+
+
+def ask(disks, preset=None, erase_given=False):
+    """The installer's questions (shared with sscigen); anything already in `preset` is not asked again. -> (answers, extras) or None."""
+    try:
+        return qa.interview(qa.make_ui("SSC Server installer"), preset, disks=disks, file_mode=False, wifi_card=has_wifi_card(), erase_given=erase_given)
+    except qa.Cancelled:
         return None
-    rc, a["disk"] = wt("--title", "Choose the disk", "--menu", "SSC Server will be installed on this disk.\nEVERYTHING ON IT WILL BE ERASED.", "18", "74", "6", *rows)
-    if rc:
-        return None
-    rc, v = wt("--title", "Confirm", "--inputbox", f"This erases {a['disk']}.\nType ERASE (capital letters) to continue:", "10", "60")
-    if rc or v != "ERASE":
-        return None
-    rc, a["hostname"] = wt("--inputbox", "Name of this server (hostname)", "8", "60", "ssc-server")
-    rc, a["admin"] = wt("--inputbox", "Name of the administrator account.\nIt is used for the web admin panel and for logging in on this machine and over SSH.", "11", "70", "admin")
-    while True:
-        rc, p1 = wt("--passwordbox", "Administrator password (at least 6 characters)", "9", "60")
-        if rc:
-            return None
-        rc, p2 = wt("--passwordbox", "Repeat the password", "9", "60")
-        if p1 == p2 and len(p1) >= 6:
-            a["password"] = p1
-            break
-        wt("--msgbox", "The passwords differ or are shorter than 6 characters.", "8", "60")
-    rc, mode = wt("--menu", "Network", "12", "64", "2", "dhcp", "Automatic address (DHCP) - recommended", "static", "Fixed IP address")
-    a["network"] = {"mode": mode or "dhcp"}
-    if mode == "static":
-        rc, addr = wt("--inputbox", "Address with prefix, e.g. 192.168.1.50/24", "8", "60")
-        rc, gw = wt("--inputbox", "Gateway (your router)", "8", "60")
-        rc, dns = wt("--inputbox", "DNS server(s), separated by comma", "8", "60", gw)
-        a["network"].update(address=addr, gateway=gw, dns=dns)
-    if any((Path("/sys/class/net") / n / "wireless").exists() for n in os.listdir("/sys/class/net")):
-        if wt("--yesno", "A Wi-Fi card was found. Connect this server to a Wi-Fi network?", "8", "64")[0] == 0:
-            rc, ssid = wt("--inputbox", "Wi-Fi network name (SSID)", "8", "60")
-            rc, pw = wt("--passwordbox", "Wi-Fi password (leave empty for an open network)", "8", "60")
-            rc, cc = wt("--inputbox", "Country code (two letters, e.g. AT, DE, US)", "8", "60", "AT")
-            a["wifi"] = {"ssid": ssid, "passphrase": pw, "open": not pw, "country": cc}
-    rc, a["timezone"] = wt("--inputbox", "Time zone (e.g. Europe/Vienna, UTC)", "8", "60", "UTC")
-    rc, a["keymap"] = wt("--inputbox", "Keyboard layout (us, de, at, fr, ...)", "8", "60", "us")
-    a["ssh"] = wt("--yesno", "Turn on SSH (remote login)?", "8", "50")[0] == 0
-    a["autologin"] = wt("--defaultno", "--yesno", "Log in automatically on this server's own screen and keyboard? (Console only: SSH and the web panel still ask for a password.)\n\nConvenient, but anyone who can touch the machine then has the administrator account.", "11", "70")[0] == 0
-    return a
+
+
+REQUIRED = ("disk", "hostname", "admin", "password", "timezone", "keymap", "ssh", "autologin", "network")
 
 
 def main(argv=None):
     args = list(sys.argv[1:] if argv is None else argv)
+    if "--example" in args:
+        print(ssci_file.EXAMPLE)
+        return 0
+    if "--check" in args:
+        import sscigen
+        return sscigen.main(args)
     dry = "--dry-run" in args
     if os.geteuid() != 0 and not dry:
         print("ssc-install must run as root")
@@ -253,14 +253,14 @@ def main(argv=None):
     disks = find_disks() if not dry else [{"path": "/dev/sda", "size": 32 * 10 ** 9, "model": "dry", "removable": False}]
     if "--auto" in args:
         return auto(run, disks)
-    a = ask(disks)
-    if not a:
+    res = ask(disks)
+    if not res:
         print("Cancelled - nothing was changed.")
         return 1
-    return finish(a, disks, run, interactive=True)
+    return finish(res[0], disks, run, interactive=True)
 
 
-def finish(raw, disks, run, interactive=False):
+def finish(raw, disks, run, interactive=False, action="poweroff"):
     try:
         ans = plan.validate_answers(raw, disks)
     except ValueError as e:
@@ -278,27 +278,88 @@ def finish(raw, disks, run, interactive=False):
     print("SSC-INSTALL-OK")
     if interactive:
         wt("--msgbox", "Installed. Remove the installation medium; the server restarts now.\nAfter the restart log in and run:  ssconfig showip", "11", "70")
-        subprocess.run(["reboot"])
+        subprocess.run(["reboot" if action == "reboot" or not action else action])
     else:
         time.sleep(5)          # let the last log lines reach the console before the machine goes down
-        subprocess.run(["poweroff"])
+        subprocess.run(["reboot" if action == "reboot" else "poweroff"])
     return 0
 
 
+# ------------------------------------------------------------------ autoinstall.ssci
+def _lsblk_tree():
+    return subprocess.run(["lsblk", "-J", "-p", "-o", "NAME,FSTYPE,TYPE,PKNAME,MOUNTPOINT"], capture_output=True, text=True).stdout
+
+
+def find_ssci(attempts=3, pause=4):
+    """Look for autoinstall.ssci on the installer medium and on every other attached drive (read-only, never executed).
+    -> (text, device, disk) or None. More than one file is an error: which one is meant?"""
+    base = Path("/run/live/medium")
+    text = ssci_file.read_from(base) if base.is_dir() else None
+    if text is not None:
+        return text, str(base), ""
+    found = []
+    for attempt in range(attempts):
+        subprocess.run(["udevadm", "settle", "--timeout=10"], capture_output=True)
+        found = []
+        for dev, fs, disk in ssci_file.candidates(_lsblk_tree()):
+            mnt = Path(tempfile.mkdtemp(prefix="ssci-"))
+            r = subprocess.run(["mount", "-o", "ro,noexec,nosuid,nodev", *(["-t", "ntfs3"] if fs == "ntfs" else []), dev, str(mnt)], capture_output=True)
+            try:
+                if r.returncode == 0:
+                    t = ssci_file.read_from(mnt)
+                    if t is not None:
+                        found.append((t, dev, disk))
+            finally:
+                if r.returncode == 0:
+                    subprocess.run(["umount", str(mnt)], capture_output=True)
+                shutil.rmtree(mnt, ignore_errors=True)
+        if found:
+            break
+        time.sleep(pause)                      # USB sticks can show up a few seconds after boot
+    if len(found) > 1:
+        raise ssci_file.SsciError("found more than one autoinstall.ssci (" + ", ".join(f[1] for f in found) + ") - remove all but one")
+    return found[0] if found else None
+
+
+def countdown(seconds, what, log=print):
+    for left in range(seconds, 0, -1):
+        if left % 5 == 0 or left <= 5:
+            log(f"AUTOINSTALL: {what} in {left} s - power the machine off now to cancel")
+        time.sleep(1)
+
+
 def auto(run, disks):
-    dev = Path("/dev/disk/by-label/SSCANS")
-    if not dev.exists():
-        print("no SSCANS disk")
-        return 3
-    mnt = Path("/mnt/sscans")
-    mnt.mkdir(parents=True, exist_ok=True)
-    run(["mount", "-o", "ro", str(dev), str(mnt)])
     try:
-        raw = json.loads((mnt / "answers.json").read_text())
-    finally:
-        run(["umount", str(mnt)], check=False)
-    disks = [d for d in disks if d["path"] != str(dev.resolve()) and not str(dev.resolve()).startswith(d["path"])]
-    return finish(raw, disks, run)
+        found = find_ssci()
+        if found is None:
+            print("no autoinstall.ssci found")
+            return 3
+        text, device, source_disk = found
+        a, extras = ssci_file.load(text)
+    except ssci_file.SsciError as e:
+        print("autoinstall.ssci:", e)
+        return 1
+    print(f"AUTOINSTALL: using the SSC Install file on {device}")
+    disks = [d for d in disks if d["path"] != source_disk]          # the drive the file came from is never erased
+    missing = [k for k in REQUIRED if k not in a]
+    interactive = bool(missing) and extras["ask"]
+    if interactive:                                                   # whatever the file does not say is asked, as usual
+        res = ask(disks, preset=a, erase_given=extras["erase"])
+        if not res:
+            print("Cancelled - nothing was changed.")
+            return 1
+        a = res[0]
+    else:
+        if not extras["erase"]:
+            print("autoinstall.ssci: a file without questions needs  erase = yes  (the target disk is erased) - nothing was changed")
+            return 1
+        try:
+            probe = plan.validate_answers(a, disks)               # fail before the countdown, not after
+        except ValueError as e:
+            print("autoinstall.ssci:", e)
+            return 1
+        countdown(extras["wait"], f"erasing {probe['disk']} and installing", run.log)
+    return finish(a, disks, run, interactive=interactive, action=extras["finish"])
 
 
 if __name__ == "__main__":
