@@ -23,6 +23,7 @@ console-setup
 keyboard-configuration
 tzdata
 systemd-sysv
+dbus
 wpasupplicant
 iw
 wireless-regdb

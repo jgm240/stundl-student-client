@@ -68,11 +68,25 @@ def parse_who(text):
     return out
 
 
+def _getty_from_proc(proc="/proc"):
+    """No system bus for this user (minimal image): look for the login program on tty1 directly."""
+    try:
+        for d in os.listdir(proc):
+            if d.isdigit():
+                with open(f"{proc}/{d}/cmdline", "rb") as f:
+                    parts = f.read().split(b"\0")
+                if parts and (parts[0].endswith(b"agetty") or parts[0].endswith(b"login")) and b"tty1" in parts:
+                    return "active"
+    except OSError:
+        pass
+    return "unknown"
+
+
 def console_info():
     """Is there a login on the machine's own screen (tty1), and who is logged in there? (Shown in the admin panel; the install tests check it.)"""
     info = {"getty": "unknown", "logged_in": []}
     try:
-        info["getty"] = subprocess.run(["systemctl", "is-active", "getty@tty1.service"], capture_output=True, text=True, timeout=5).stdout.strip() or "unknown"
+        info["getty"] = subprocess.run(["systemctl", "is-active", "getty@tty1.service"], capture_output=True, text=True, timeout=5).stdout.strip() or _getty_from_proc()
         info["logged_in"] = parse_who(subprocess.run(["who"], capture_output=True, text=True, timeout=5).stdout)
     except (OSError, subprocess.SubprocessError):
         pass
