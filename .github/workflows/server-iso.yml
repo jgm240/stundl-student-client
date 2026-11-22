@@ -64,6 +64,9 @@ jobs:
           sudo chmod 666 /dev/kvm || true
       - name: Live boot
         run: tests/iso/qemu_test.sh live "$(ls iso/*.iso)" ${{ matrix.arch }}
+      - name: Live boot (UEFI, 64-bit only)
+        if: matrix.arch == 'amd64'
+        run: UEFI=1 tests/iso/qemu_test.sh live "$(ls iso/*.iso)" amd64
       - name: Install to disk (BIOS) and boot it
         run: tests/iso/qemu_test.sh install "$(ls iso/*.iso)" ${{ matrix.arch }}
       - name: Install to disk (UEFI, 64-bit only)

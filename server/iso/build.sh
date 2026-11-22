@@ -20,7 +20,7 @@ lb config noauto \
   --binary-images iso-hybrid $BOOT --debian-installer none \
   --archive-areas "main non-free-firmware" --apt-recommends false --apt-indices false \
   --iso-volume "SSC-SERVER-$ARCH" --iso-application "SSC Server" --iso-publisher "SSC Server project" \
-  --bootappend-live "boot=live components quiet splash=0 console=tty0 console=ttyS0,115200" \
+  --bootappend-live "boot=live components quiet splash=0 nomodeset console=tty0 console=ttyS0,115200" \
   --mirror-bootstrap http://deb.debian.org/debian --mirror-binary http://deb.debian.org/debian \
   --security false --updates true --memtest none
 

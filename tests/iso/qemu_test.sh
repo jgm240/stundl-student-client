@@ -11,14 +11,28 @@ ACCEL=""; [ -w /dev/kvm ] && ACCEL="-enable-kvm -cpu max" || ACCEL="-cpu max"
 SLOW=1
 if [ "$ARCH" = i386 ]; then ACCEL="-cpu max"; SLOW=4; fi     # 32-bit guests are emulated (KVM hangs on the CI hosts): slower, so wait longer
 PW='Twelve-chars-ok1'
+screen_check() {   # screenshot via the QEMU monitor; a console with a login prompt has thousands of lit pixels, a blank cursor has a handful
+python3 - "$1" <<'PY'
+import socket, sys, time
+w = sys.argv[1]
+s = socket.socket(socket.AF_UNIX); s.connect(w + "/mon.sock"); time.sleep(0.5); s.recv(4096)
+s.sendall(("screendump " + w + "/screen.ppm\n").encode()); time.sleep(2)
+d = open(w + "/screen.ppm", "rb").read()
+parts = d.split(None, 4); lit = sum(1 for i in range(0, len(parts[4]) - 2, 3) if parts[4][i] or parts[4][i + 1] or parts[4][i + 2])
+print("lit pixels on the console:", lit)
+sys.exit(0 if lit > 800 else 1)
+PY
+}
 echo "== $MODE $ARCH ($Q $ACCEL)"
 
 if [ "$MODE" = live ]; then
-  timeout $((420*SLOW)) $Q $ACCEL -m 1024 -cdrom "$ISO" -boot d -monitor none -serial file:$W/serial.log -display none -no-reboot \
+  BIOSARG=""; [ "${UEFI:-0}" = 1 ] && BIOSARG="-bios /usr/share/ovmf/OVMF.fd"
+  timeout $((420*SLOW)) $Q $ACCEL -m 1024 $BIOSARG -cdrom "$ISO" -boot d -monitor unix:$W/mon.sock,server,nowait -serial file:$W/serial.log -display none -no-reboot \
      -netdev user,id=n0 -device virtio-net-pci,netdev=n0 &
   for i in $(seq 1 $((100*SLOW))); do grep -q "SSC Server" "$W/serial.log" 2>/dev/null && grep -q "login:" "$W/serial.log" 2>/dev/null && break; sleep 4; done
   tail -n 30 "$W/serial.log" || true
-  grep -q "login:" "$W/serial.log" && echo "LIVE BOOT OK"; exit $?
+  grep -q "login:" "$W/serial.log" || { echo "LIVE BOOT FAILED"; exit 1; }
+  echo "LIVE BOOT OK"; sleep 15; screen_check "$W" && echo "LIVE CONSOLE SHOWS TEXT OK"; exit $?
 fi
 
 # ---- install mode
@@ -51,16 +65,6 @@ test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18080/data.json)
 echo "WEB + AUTH OK"
 # the SCREEN (tty1) must show a login prompt, not a blank cursor: screenshot via the QEMU monitor, count lit pixels
 sleep 20
-python3 - "$W" <<'PY'
-import socket, sys, time
-w = sys.argv[1]
-s = socket.socket(socket.AF_UNIX); s.connect(w + "/mon.sock"); time.sleep(0.5); s.recv(4096)
-s.sendall(("screendump " + w + "/screen.ppm\n").encode()); time.sleep(2)
-d = open(w + "/screen.ppm", "rb").read()
-# P6 header: magic, width height, maxval, then pixels
-parts = d.split(None, 4); lit = sum(1 for i in range(0, len(parts[4]) - 2, 3) if parts[4][i] or parts[4][i + 1] or parts[4][i + 2])
-print("lit pixels on the console:", lit)
-sys.exit(0 if lit > 800 else 1)
-PY
+screen_check "$W"
 echo "CONSOLE SHOWS TEXT OK"
 echo "ALL INSTALL CHECKS OK ($ARCH)"

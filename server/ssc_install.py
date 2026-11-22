@@ -154,7 +154,7 @@ def install(ans, run, root=TARGET, efi=None, a=None):
             (root / "etc/default").mkdir(parents=True, exist_ok=True)
             (root / "etc/default/grub").write_text(
                 'GRUB_DEFAULT=0\nGRUB_TIMEOUT=2\nGRUB_DISTRIBUTOR="SSC Server"\nGRUB_CMDLINE_LINUX_DEFAULT="quiet"\n'
-                'GRUB_CMDLINE_LINUX="console=tty0 console=ttyS0,115200"\nGRUB_DISABLE_OS_PROBER=true\n')
+                'GRUB_CMDLINE_LINUX="console=tty0 console=ttyS0,115200 nomodeset"\nGRUB_DISABLE_OS_PROBER=true\n')
 
         step("Installing the boot loader")
         ch("update-initramfs", "-u", "-k", "all")
