@@ -22,11 +22,11 @@ HERE = Path(__file__).resolve().parent
 START = time.time()
 
 
-def _page(name, prefs_api=True):
+def _page(name, prefs_api=True, classic=False):
     for d in (HERE, core.APPDIR, HERE.parent):
         f = d / name
         if f.exists():
-            return core.load_page(f, prefs_api=prefs_api)
+            return core.load_page(f, prefs_api=prefs_api, classic=classic)
     raise FileNotFoundError(name)
 
 
@@ -153,8 +153,8 @@ def make_handler():
                 if not s:
                     return self.html(200, _page("login.html", prefs_api=False))
                 if s["role"] == "admin":
-                    return self.html(200, self.chrome(_page("index.html"), s, True))
-                return self.html(200, self.chrome(_page("parent.html"), s, False))
+                    return self.html(200, self.chrome(_page("index.html", classic=core.ui_choice(self.headers.get("Cookie", "")) == "classic"), s, True))
+                return self.html(200, self.chrome(_page("parent.html", classic=core.ui_choice(self.headers.get("Cookie", "")) == "classic"), s, False))
             if u.path == "/admin":
                 if not (s and s["role"] == "admin"):
                     return self.redirect("/")

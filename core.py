@@ -214,35 +214,59 @@ PREF_LANGS = ("en", "de", "fr", "es", "it", "pt", "nl", "pl")
 PREF_MODES = ("system", "light", "dark")
 PREF_PALETTES = ("default", "paper", "ocean", "forest", "midnight", "rose", "graphite")
 PREF_ACCENTS = ("indigo", "blue", "teal", "green", "orange", "pink", "purple", "slate")
+PREF_UIS = ("beta", "classic")            # the redesigned interface, or the one from before the redesign
 
 
 def clean_prefs(d):
     """Only known keys with known values survive: preferences are stored per user and echoed back into pages."""
     d = d if isinstance(d, dict) else {}
     out = {}
-    for key, allowed in (("lang", PREF_LANGS), ("theme", PREF_MODES), ("palette", PREF_PALETTES), ("accent", PREF_ACCENTS)):
+    for key, allowed in (("lang", PREF_LANGS), ("theme", PREF_MODES), ("palette", PREF_PALETTES), ("accent", PREF_ACCENTS), ("ui", PREF_UIS)):
         if d.get(key) in allowed:
             out[key] = d[key]
     return out
 
 
 UI_MARK = "<!--SSC-UI-->"
+SWITCH_BACK = ("<button id='ssc-ui-switch' type='button' onclick=\"SSCUI.set({ui:'beta'})\" style=\"position:fixed;left:12px;bottom:12px;z-index:99;font:13px system-ui,"
+               "sans-serif;padding:7px 13px;border-radius:99px;border:1px solid rgba(128,128,128,.45);background:rgba(255,255,255,.9);color:#111;cursor:pointer\">"
+               "New interface (beta)</button>")
 
 
-def load_page(path, prefs_api=False):
+def ui_choice(cookie_header):
+    """'classic' if the browser asked for the old interface (cookie ssc_ui=classic), else 'beta'."""
+    m = re.search(r"(?:^|;\s*)ssc_ui=(classic|beta)\b", str(cookie_header or ""))
+    return m.group(1) if m else "beta"
+
+
+def _runtime_js(path):
+    for d in (path.parent, path.parent.parent, APPDIR):
+        f = d / "ui.js"
+        if f.exists():
+            return f.read_text(encoding="utf-8")
+    return None
+
+
+def load_page(path, prefs_api=False, classic=False):
     """An HTML page with the shared front-end runtime (ui.js: languages, themes, accent colours) inlined at <!--SSC-UI-->.
     prefs_api=True lets the page save the user's preferences through /api/prefs (only pages served by an app server, never
-    the read-only Parent link server)."""
+    the read-only Parent link server). classic=True serves the old interface (classic/<name>) when it exists: it gets the
+    language runtime only (no themes - its own design) and a button to go back to the new one."""
     path = Path(path)
-    html = path.read_text(encoding="utf-8")
-    if UI_MARK in html:
-        js = None
-        for d in (path.parent, path.parent.parent, APPDIR):
-            f = d / "ui.js"
-            if f.exists():
-                js = f.read_text(encoding="utf-8")
+    old = None
+    if classic:
+        for d in (path.parent, APPDIR):
+            if (d / "classic" / path.name).exists():
+                old = d / "classic" / path.name
                 break
-        block = ("<script>window.SSC_PREFS_API=true;</script>" if prefs_api else "") + (("<script>" + js.replace("</script", "<\\/script") + "</script>") if js else "")
+    html = (old or path).read_text(encoding="utf-8")
+    js = _runtime_js(path)
+    esc = lambda t: t.replace("</script", "<\\/script")
+    block = ("<script>window.SSC_PREFS_API=true;</script>" if prefs_api else "") + (("<script>" + esc(js) + "</script>") if js else "")
+    if old:
+        block = "<script>window.SSC_CLASSIC=true;</script>" + block
+        html = html.replace("<head>", "<head>" + block, 1).replace("</body>", SWITCH_BACK + "</body>", 1)
+    elif UI_MARK in html:
         html = html.replace(UI_MARK, block, 1)
     return html
 

@@ -31,11 +31,12 @@ def node(code):
 @unittest.skipUnless(NODE, "Node.js is not installed")
 class RuntimeTests(unittest.TestCase):
     def test_python_and_js_agree_on_the_allowed_values(self):
-        out = json.loads(node('const u=require("./ui.js");console.log(JSON.stringify({l:Object.keys(u.LANGS),m:u.MODES,p:Object.keys(u.PALETTES),a:Object.keys(u.ACCENTS)}))'))
+        out = json.loads(node('const u=require("./ui.js");console.log(JSON.stringify({l:Object.keys(u.LANGS),m:u.MODES,p:Object.keys(u.PALETTES),a:Object.keys(u.ACCENTS),i:u.UIS}))'))
         self.assertEqual(tuple(out["l"]), core.PREF_LANGS)
         self.assertEqual(tuple(out["m"]), core.PREF_MODES)
         self.assertEqual(tuple(out["p"]), core.PREF_PALETTES)
         self.assertEqual(tuple(out["a"]), core.PREF_ACCENTS)
+        self.assertEqual(tuple(out["i"]), core.PREF_UIS)
 
     def test_dictionary_is_complete_and_consistent(self):
         src = (ROOT / "ui.js").read_text(encoding="utf-8")
@@ -86,7 +87,7 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(json.loads(out).get("theme"), None)
 
     def test_every_page_script_is_valid_javascript(self):
-        for name in ("index.html", "parent.html", "server/login.html", "server/admin.html", "ui.js"):
+        for name in ("index.html", "parent.html", "classic/index.html", "classic/parent.html", "server/login.html", "server/admin.html", "ui.js"):
             text = (ROOT / name).read_text(encoding="utf-8")
             scripts = [text] if name.endswith(".js") else re.findall(r"<script>(.*?)</script>", text, re.S)
             for i, js in enumerate(scripts):
@@ -120,6 +121,32 @@ class PageTests(unittest.TestCase):
         p = (ROOT / "parent.html").read_text(encoding="utf-8")
         for needle in ("subjChip(h.subject)", "dWeek(e.date)", "No subject"):
             self.assertIn(needle, p, needle)
+
+    def test_interface_choice(self):
+        self.assertEqual(core.ui_choice("ssc_sess=abc; ssc_ui=classic"), "classic")
+        self.assertEqual(core.ui_choice("ssc_ui=classic"), "classic")
+        for c in ("", None, "ssc_ui=beta", "ssc_ui=other", "xssc_ui=classic", "foo=ssc_ui=classic"):
+            self.assertEqual(core.ui_choice(c), "beta", c)
+        self.assertEqual(core.clean_prefs({"ui": "classic"}), {"ui": "classic"})
+        self.assertEqual(core.clean_prefs({"ui": "../../etc"}), {})
+
+    def test_classic_pages(self):
+        for name in ("index.html", "parent.html"):
+            beta = core.load_page(ROOT / name, prefs_api=True)
+            old = core.load_page(ROOT / name, prefs_api=True, classic=True)
+            self.assertNotIn("window.SSC_CLASSIC=true", beta)
+            self.assertIn("window.SSC_CLASSIC=true", old)
+            self.assertIn("ssc-ui-switch", old)
+            self.assertIn("SSCUI.set({ui:'beta'})", old)
+            self.assertIn("root.SSCUI = API", old)
+            self.assertNotEqual(beta, old)
+            self.assertNotIn("<!--SSC-UI-->", old)
+            self.assertEqual(old.count("</body>"), 1)
+        self.assertIn("glass", core.load_page(ROOT / "index.html", classic=True))
+        self.assertNotIn("SSC_CLASSIC=true", core.load_page(ROOT / "server/login.html", classic=True))
+
+    def test_classic_runtime_keeps_its_own_design(self):
+        self.assertIn("root.SSC_CLASSIC) return;", (ROOT / "ui.js").read_text())
 
     def test_clean_prefs(self):
         self.assertEqual(core.clean_prefs({"lang": "de", "theme": "dark", "palette": "ocean", "accent": "teal", "evil": "<script>"}),

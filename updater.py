@@ -40,7 +40,7 @@ TAG_OK = re.compile(r"^v\d+\.\d+\.\d+(?:-(?:alpha|beta|rc)\.\d+)?$")
 
 # What a server install consists of (the same files the image build copies). Nothing else is ever written.
 ALLOWED = ["core.py", "ssc.py", "vault.py", "jobs.py", "untis_direct.py", "ssc_imgen.py", "ssc_version.py", "updater.py", "menu_model.py",
-           "tui.py", "ui.js", "index.html", "parent.html", "LICENSE", "assets/icon.png", "server/*.py", "server/*.html"]
+           "tui.py", "ui.js", "index.html", "parent.html", "classic/*.html", "LICENSE", "assets/icon.png", "server/*.py", "server/*.html"]
 REQUIRED = ["ssc.py", "core.py", "ssc_version.py", "updater.py", "ui.js", "index.html", "parent.html", "server/serverapp.py", "server/ssconfig.py",
             "server/serverconf.py", "server/auth.py", "server/applycfg.py", "server/login.html", "server/admin.html"]
 

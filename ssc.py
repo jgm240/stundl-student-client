@@ -666,7 +666,7 @@ def make_parent_handler():
                 return self.reply(404, "not found")
             if m.group(2) == "/data.json":
                 return self.reply(200, parent_data(), "application/json")
-            return self.reply(200, core.load_page(core.APPDIR / "parent.html"), "text/html; charset=utf-8")
+            return self.reply(200, core.load_page(core.APPDIR / "parent.html", classic=core.ui_choice(self.headers.get("Cookie", "")) == "classic"), "text/html; charset=utf-8")
 
         def do_other(self):
             self.reply(405, "read-only")
@@ -833,7 +833,7 @@ def make_handler(port=None):
             if not self.guard(): return
             u = urlparse(self.path)
             if u.path == "/":
-                page = core.load_page(core.APPDIR / "index.html", prefs_api=True)
+                page = core.load_page(core.APPDIR / "index.html", prefs_api=True, classic=core.ui_choice(self.headers.get("Cookie", "")) == "classic")
                 k = parse_qs(u.query).get("k", [""])[0]
                 if k and secrets.compare_digest(k.encode(), self.server.boot.encode()):
                     sid = secrets.token_urlsafe(24)

@@ -343,6 +343,28 @@ class ServerTests(unittest.TestCase):
         self.assertIn("root.SSCUI = API", Client(self.port).req("GET", "/")[1])               # the login page too
         self.assertNotIn("SSC_PREFS_API=true", Client(self.port).req("GET", "/")[1])             # ...but it has no account to save to
 
+    def test_interface_choice_decides_which_page_is_served(self):
+        for who, pw in (("boss", "twelve-chars!"), ("anna", "longenoughpw")):
+            c = Client(self.port)
+            c.login(who, pw)
+            self.assertNotIn("window.SSC_CLASSIC=true", c.req("GET", "/")[1])
+            c.cookie += "; ssc_ui=classic"
+            old = c.req("GET", "/")[1]
+            self.assertIn("window.SSC_CLASSIC=true", old, who)
+            self.assertIn("ssc-ui-switch", old)
+            c.cookie = c.cookie.split(";")[0] + "; ssc_ui=beta"
+            self.assertNotIn("window.SSC_CLASSIC=true", c.req("GET", "/")[1])
+        anon = Client(self.port)
+        anon.cookie = "ssc_ui=classic"
+        self.assertNotIn("SSC_CLASSIC=true", anon.req("GET", "/")[1])
+        auth.create("uitest", "longenoughpw", "user")                       # its own account: preferences are stored per account
+        u = Client(self.port)
+        u.login("uitest", "longenoughpw")
+        u.req("POST", "/api/prefs", {"ui": "classic", "lang": "de"})
+        self.assertEqual(json.loads(u.req("GET", "/api/prefs")[1]), {"ui": "classic", "lang": "de"})
+        u.req("POST", "/api/prefs", {"ui": "nonsense"})
+        self.assertEqual(json.loads(u.req("GET", "/api/prefs")[1])["ui"], "classic")
+
     def test_update_endpoints_are_admin_only_and_go_through_the_root_helper(self):
         import updater
         old = updater.releases

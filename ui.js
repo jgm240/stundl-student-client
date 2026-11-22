@@ -227,6 +227,12 @@ var D = [
 ["Downloading…", "Lade herunter…", "Téléchargement…", "Descargando…", "Download in corso…", "A transferir…", "Downloaden…", "Pobieranie…"],
 ["Saved to {p}. Quit SSC and unpack it over the old one.", "Gespeichert unter {p}. SSC beenden und über die alte Version entpacken.", "Enregistré dans {p}. Quittez SSC et décompressez par-dessus l'ancienne version.", "Guardado en {p}. Cierra SSC y descomprímelo sobre la versión anterior.", "Salvato in {p}. Chiudi SSC e decomprimi sopra la vecchia versione.", "Guardado em {p}. Feche o SSC e descompacte por cima da versão antiga.", "Opgeslagen in {p}. Sluit SSC af en pak het over de oude versie uit.", "Zapisano w {p}. Zamknij SSC i rozpakuj nad starą wersją."],
 ["The server is updating and restarts in a moment…", "Der Server wird aktualisiert und startet gleich neu…", "Le serveur se met à jour et redémarre dans un instant…", "El servidor se está actualizando y se reiniciará en un momento…", "Il server si sta aggiornando e si riavvierà a breve…", "O servidor está a atualizar e reinicia em instantes…", "De server wordt bijgewerkt en start zo opnieuw op…", "Serwer się aktualizuje i zaraz uruchomi się ponownie…"],
+// ---- interface switch
+["Interface", "Oberfläche", "Interface", "Interfaz", "Interfaccia", "Interface", "Interface", "Interfejs"],
+["Beta (new)", "Beta (neu)", "Bêta (nouveau)", "Beta (nueva)", "Beta (nuova)", "Beta (nova)", "Beta (nieuw)", "Beta (nowy)"],
+["Classic (old)", "Klassisch (alt)", "Classique (ancien)", "Clásica (antigua)", "Classica (vecchia)", "Clássica (antiga)", "Klassiek (oud)", "Klasyczny (stary)"],
+["New interface (beta)", "Neue Oberfläche (Beta)", "Nouvelle interface (bêta)", "Nueva interfaz (beta)", "Nuova interfaccia (beta)", "Nova interface (beta)", "Nieuwe interface (beta)", "Nowy interfejs (beta)"],
+["The classic interface is the old design: it has no themes or accent colors and lacks newer features (updates, watch, grouping and the new exam view).", "Die klassische Oberfläche ist das alte Design: Sie hat keine Designs oder Akzentfarben und es fehlen neuere Funktionen (Updates, Uhr, Gruppierung und die neue Prüfungsansicht).", "L'interface classique est l'ancien design : sans thèmes ni couleurs d'accent, et sans les fonctions récentes (mises à jour, montre, regroupement et nouvelle vue des examens).", "La interfaz clásica es el diseño antiguo: no tiene temas ni colores de acento y le faltan funciones nuevas (actualizaciones, reloj, agrupación y la nueva vista de exámenes).", "L'interfaccia classica è il vecchio design: niente temi né colori d'accento e mancano le funzioni più recenti (aggiornamenti, orologio, raggruppamento e la nuova vista delle verifiche).", "A interface clássica é o design antigo: não tem temas nem cores de destaque e faltam funções mais recentes (atualizações, relógio, agrupamento e a nova vista de exames).", "De klassieke interface is het oude ontwerp: geen thema's of accentkleuren en nieuwere functies ontbreken (updates, horloge, groeperen en de nieuwe toetsweergave).", "Interfejs klasyczny to stary wygląd: nie ma motywów ani kolorów akcentu i brakuje w nim nowszych funkcji (aktualizacje, zegarek, grupowanie i nowy widok sprawdzianów)."],
 // ---- parent page, login, chrome
 ["School overview", "Schulübersicht", "Aperçu scolaire", "Resumen escolar", "Panoramica scolastica", "Resumo escolar", "Schooloverzicht", "Przegląd szkolny"],
 ["Offline - showing the last data received ({d}).", "Offline – zuletzt empfangene Daten ({d}).", "Hors ligne – dernières données reçues ({d}).", "Sin conexión: se muestran los últimos datos recibidos ({d}).", "Offline: ultimi dati ricevuti ({d}).", "Offline – a mostrar os últimos dados recebidos ({d}).", "Offline – laatst ontvangen gegevens ({d}).", "Offline – ostatnio odebrane dane ({d})."],
@@ -327,7 +333,8 @@ var ACCENTS = {   // id: [light, dark, companion colour used in gradients]
   green: ["#16a34a", "#4ade80", "#0ea5e9", "Green"], orange: ["#ea580c", "#fb923c", "#e11d48", "Orange"], pink: ["#e11d48", "#fb7185", "#f59e0b", "Pink"],
   purple: ["#9333ea", "#c084fc", "#ec4899", "Purple"], slate: ["#475569", "#94a3b8", "#0ea5a4", "Slate"]
 };
-var DEFAULTS = { lang: "", theme: "system", palette: "default", accent: "indigo" };
+var UIS = ["beta", "classic"];
+var DEFAULTS = { lang: "", theme: "system", palette: "default", accent: "indigo", ui: "" };
 var prefs = {}, listeners = [], KEY = "ssc-prefs";
 
 function store(get, key, val) {
@@ -346,6 +353,7 @@ function clean(p) {
   if (p && MODES.indexOf(p.theme) >= 0) o.theme = p.theme;
   if (p && Object.prototype.hasOwnProperty.call(PALETTES, p.palette)) o.palette = p.palette;
   if (p && ACCENTS[p.accent]) o.accent = p.accent;
+  if (p && UIS.indexOf(p.ui) >= 0) o.ui = p.ui;
   return o;
 }
 
@@ -368,7 +376,7 @@ function hexToRgba(hex, a) {
 }
 
 function applyAppearance() {
-  if (!root.document) return;
+  if (!root.document || root.SSC_CLASSIC) return;
   var doc = root.document, el = doc.documentElement, mode = effectiveMode(), st = el.style;
   el.setAttribute("data-theme", mode);
   el.lang = lang;
@@ -392,12 +400,28 @@ function translateAll() {
   root.document.title = tr(root.document.title_o || (root.document.title_o = root.document.title));
 }
 
+function setUiCookie(ui) {
+  try { root.document.cookie = "ssc_ui=" + ui + "; Path=/; Max-Age=31536000; SameSite=Lax"; } catch (e) { /* cookies off */ }
+}
+
+/* the page that was served must match the chosen interface; one reload at most per tab (no loops) */
+function ensureInterface() {
+  if (!root.document || !prefs.ui) return;
+  var shown = root.SSC_CLASSIC ? "classic" : "beta";
+  if (prefs.ui === shown) { setUiCookie(prefs.ui); return; }
+  var done = store(true, "ssc-ui-reload");
+  setUiCookie(prefs.ui);
+  if (done === prefs.ui) return;
+  try { root.sessionStorage.setItem("ssc-ui-reload", prefs.ui); } catch (e) { return; }
+  root.location.reload();
+}
+
 function setPrefs(patch, opts) {
   var next = {};
   Object.keys(DEFAULTS).forEach(function (k) { next[k] = prefs[k]; });
   var c = clean(patch);
   Object.keys(c).forEach(function (k) { next[k] = c[k]; });
-  var langChanged = c.lang && c.lang !== prefs.lang;
+  var langChanged = c.lang && c.lang !== prefs.lang, uiChanged = c.ui && c.ui !== (prefs.ui || (root.SSC_CLASSIC ? "classic" : "beta"));
   prefs = next;
   lang = prefs.lang || guessLang();
   applyAppearance();
@@ -407,6 +431,7 @@ function setPrefs(patch, opts) {
     save();
   }
   listeners.forEach(function (f) { try { f(prefs); } catch (e) { /* a page callback must not break the others */ } });
+  if (uiChanged && (!opts || !opts.silent)) { try { root.sessionStorage.removeItem("ssc-ui-reload"); } catch (e) { /* private mode */ } setUiCookie(prefs.ui); setTimeout(function () { root.location.reload(); }, 400); }
 }
 
 var saveTimer = null;
@@ -425,7 +450,7 @@ function save() {                                               // best effort: 
 function loadRemote() {
   if (!remoteOk()) return;
   root.fetch("/api/prefs", { cache: "no-store" }).then(function (r) { return r.ok ? r.json() : null; }).then(function (p) {
-    if (p && Object.keys(clean(p)).length) { setPrefs(clean(p), { silent: true, retranslate: true }); store(false, KEY, JSON.stringify(prefs)); }
+    if (p && Object.keys(clean(p)).length) { setPrefs(clean(p), { silent: true, retranslate: true }); store(false, KEY, JSON.stringify(prefs)); ensureInterface(); }
   }).catch(function () {});
 }
 
@@ -494,7 +519,10 @@ function panelHtml() {
     var a = ACCENTS[k];
     return '<button type="button" class="sscui-dot' + (k === acc ? " on" : "") + '" data-ssc-accent="' + k + '" title="' + h(a[3]) + '" aria-label="' + h(a[3]) + '" style="background:' + (m2 === "dark" ? a[1] : a[0]) + '"></button>';
   }).join("");
-  return '<div class="sscui-row"><label>' + h("Language") + '</label><select data-ssc-lang>' + langs + '</select></div>' +
+  var ui = prefs.ui || (root.SSC_CLASSIC ? "classic" : "beta");
+  var uis = '<div class="sscui-segs">' + [["beta", "Beta (new)"], ["classic", "Classic (old)"]].map(function (x) { return '<button type="button" class="sscui-seg' + (x[0] === ui ? " on" : "") + '" data-ssc-ui="' + x[0] + '">' + h(x[1]) + "</button>"; }).join("") + "</div>";
+  return '<div class="sscui-row"><label>' + h("Interface") + '</label>' + uis + '<p class="sscui-note" style="margin-top:6px">' + h("The classic interface is the old design: it has no themes or accent colors and lacks newer features (updates, watch, grouping and the new exam view).") + "</p></div>" +
+         '<div class="sscui-row"><label>' + h("Language") + '</label><select data-ssc-lang>' + langs + '</select></div>' +
          '<div class="sscui-row"><label>' + h("Mode") + '</label><div class="sscui-segs">' + modes + '</div></div>' +
          '<div class="sscui-row"><label>' + h("Theme") + '</label><div class="sscui-pals">' + pals + '</div></div>' +
          '<div class="sscui-row"><label>' + h("Accent color") + '</label><div class="sscui-dots">' + accs + '</div></div>' +
@@ -507,6 +535,7 @@ function bindPanel(box) {
   var refresh = function () { bindPanel(box); };
   var sel = box.querySelector("[data-ssc-lang]");
   if (sel) sel.onchange = function () { setPrefs({ lang: sel.value }); refresh(); };
+  [].forEach.call(box.querySelectorAll("[data-ssc-ui]"), function (b) { b.onclick = function () { setPrefs({ ui: b.getAttribute("data-ssc-ui") }); refresh(); }; });
   [].forEach.call(box.querySelectorAll("[data-ssc-mode]"), function (b) { b.onclick = function () { setPrefs({ theme: b.getAttribute("data-ssc-mode") }); refresh(); }; });
   [].forEach.call(box.querySelectorAll("[data-ssc-palette]"), function (b) { b.onclick = function () { setPrefs({ palette: b.getAttribute("data-ssc-palette") }); refresh(); }; });
   [].forEach.call(box.querySelectorAll("[data-ssc-accent]"), function (b) { b.onclick = function () { setPrefs({ accent: b.getAttribute("data-ssc-accent") }); refresh(); }; });
@@ -552,7 +581,7 @@ function mount(el) { if (!el) return; injectCss(); bindPanel(el); }
 
 // ------------------------------------------------------------------ public API
 var API = {
-  LANGS: LANGS, ACCENTS: ACCENTS, PALETTES: PALETTES, MODES: MODES,
+  LANGS: LANGS, ACCENTS: ACCENTS, PALETTES: PALETTES, MODES: MODES, UIS: UIS,
   t: T, tr: tr,
   lang: function () { return lang; },
   locale: function () { return LOCALES[lang] || "en-GB"; },
@@ -573,7 +602,7 @@ if (root.document) {
     var mq = root.matchMedia("(prefers-color-scheme: dark)");
     (mq.addEventListener ? mq.addEventListener.bind(mq, "change") : mq.addListener.bind(mq))(function () { if (prefs.theme === "system" || !prefs.theme) { applyAppearance(); listeners.forEach(function (f) { f(prefs); }); } });
   }
-  var ready = function () { translateAll(); startObserver(); loadRemote(); };
+  var ready = function () { translateAll(); startObserver(); ensureInterface(); loadRemote(); };
   if (root.document.readyState === "loading") root.document.addEventListener("DOMContentLoaded", ready); else ready();
 }
 if (typeof module !== "undefined" && module.exports) module.exports = API;

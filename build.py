@@ -17,7 +17,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 WIN = sys.platform.startswith("win")
 SEP = ";" if WIN else ":"
-DATA = ["index.html", "parent.html", "ui.js", "assets/menubar.png", "assets/icon.png"]
+DATA = ["index.html", "parent.html", "classic/index.html", "classic/parent.html", "ui.js", "assets/menubar.png", "assets/icon.png"]
 HIDDEN = ["vault", "jobs", "menu_model", "tray", "tui", "segno", "pystray", "keyring.backends.Windows" if WIN else "keyring.backends.SecretService"]
 
 
@@ -25,7 +25,8 @@ def pyinstaller(name, windowed):
     cmd = [sys.executable, "-m", "PyInstaller", "--noconfirm", "--distpath", str(ROOT / "dist"), "--workpath", str(ROOT / "build" / name),
            "--specpath", str(ROOT / "build"), "--name", name, "--windowed" if windowed else "--console"]
     for d in DATA:
-        cmd += ["--add-data", f"{ROOT / d}{SEP}."]
+        dest = "classic" if d.startswith("classic/") else "."          # the old interface keeps its own folder (same file names as the new one)
+        cmd += ["--add-data", f"{ROOT / d}{SEP}{dest}"]
     if WIN:
         from PIL import Image
         ico = ROOT / "build" / "icon.ico"

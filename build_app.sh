@@ -11,7 +11,7 @@ python3 -m venv "$BUILD/venv"
 "$BUILD/venv/bin/pyinstaller" --noconfirm --windowed --name "Stundl Student Client" \
   --osx-bundle-identifier com.stundl.ssc \
   --distpath dist --workpath "$BUILD/work" --specpath "$BUILD" \
-  --icon "$PWD/assets/icon.icns" --add-data "$PWD/index.html:." --add-data "$PWD/parent.html:." --add-data "$PWD/ui.js:." --add-data "$PWD/assets/menubar.png:." \
+  --icon "$PWD/assets/icon.icns" --add-data "$PWD/index.html:." --add-data "$PWD/parent.html:." --add-data "$PWD/ui.js:." --add-data "$PWD/classic:classic" --add-data "$PWD/assets/menubar.png:." \
   --collect-all playwright --collect-all textual --collect-all rich \
   --collect-submodules webview --collect-submodules rumps \
   --hidden-import vault --hidden-import keyring.backends.macOS --collect-submodules keyring --hidden-import segno --hidden-import tui --hidden-import menubar --hidden-import core \
