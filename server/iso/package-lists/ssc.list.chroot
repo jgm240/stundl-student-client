@@ -33,3 +33,6 @@ firmware-realtek
 firmware-brcm80211
 firmware-ralink
 firmware-misc-nonfree
+python3-pil
+python3-segno
+fonts-dejavu-core

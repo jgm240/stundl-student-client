@@ -1005,6 +1005,9 @@ def main():
     x.add_argument("action", choices=["scan", "pair", "sync", "test", "forget"], nargs="?", default="sync")
     x.add_argument("address", nargs="?")
     x.set_defaults(f=cmd_pinetime)
+    x = sp.add_parser("imgen", help="make a printable access card (logo, address, user, password, notes)")
+    x.add_argument("rest", nargs=argparse.REMAINDER)
+    x.set_defaults(f=lambda a: sys.exit(__import__("ssc_imgen").main(a.rest)))
     sp.add_parser("server", help="run SSC Server (web login, roles, Parent view)").set_defaults(f=cmd_server)
     for name, fn in (("serve", cmd_serve), ("gui", cmd_gui)):
         x = sp.add_parser(name); x.add_argument("--port", type=int, default=8765)
@@ -1042,6 +1045,8 @@ def main():
     if len(sys.argv) == 1 or sys.argv[1].startswith("-psn"):  # double-clicked app: GUI - or the terminal view on a Linux box without a display
         no_display = sys.platform.startswith("linux") and not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
         sys.argv = [sys.argv[0], "tui" if no_display else "gui"]
+    if len(sys.argv) > 1 and sys.argv[1] == "imgen":          # its own option parser (argparse can't pass leading --options on)
+        sys.exit(__import__("ssc_imgen").main(sys.argv[2:]))
     a = ap.parse_args()
     try:
         a.f(a)

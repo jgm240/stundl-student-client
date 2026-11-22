@@ -34,6 +34,9 @@ The image includes `wpa_supplicant` and firmware for common Wi-Fi chips (Intel, 
 * The password is never stored: only the derived WPA2 key goes into a root-only file (`/etc/wpa_supplicant/ssc-wifi.conf`).
   Set the country code, or 5 GHz networks may not be found. WPA2-Personal and open networks only (no WPA3-only or enterprise/802.1X).
 
+## Access cards
+`ssc-imgen --user anna --notes "Sign in on the TV" -o anna.png` makes a printable card (logo, the server's `ip:port`, user name, password, notes, QR code) to hand to a family member - like a hotel Wi-Fi card. The address is detected from this server's settings. The password is typed at a prompt (it can't be read back from the server, which only keeps hashes) and appears only on the picture: delete the file after printing.
+
 ## Notes and limits
 * Beta software. The ISOs are tested in QEMU (boot, unattended install, first boot, web login), not on a wide range of real hardware.
 * Secure Boot is not supported (the ISO is not signed with a Microsoft-trusted key); turn it off for the install.

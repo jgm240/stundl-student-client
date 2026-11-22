@@ -39,6 +39,9 @@ A Debian-based, installable server image (64-bit and 32-bit) with guest/user/adm
 ## PineTime / JWatch watch
 `ssc pinetime scan|pair|sync` sets the watch clock and sends notifications over Bluetooth. On the JWatch firmware it also fills the **School** screen (next lessons, exams `Exam:`, homework `HW:`). Not tested on a real watch. Needs `pip install bleak`.
 
+## Access cards (`ssc-imgen`)
+`./ssc-imgen --user anna` (or `ssc imgen ...`, or `ssc-imgen` on the server ISO) makes a printable card like the Wi-Fi card in a hotel room: the SSC logo, `ip:port` (detected automatically on a server), user name, password, optional `--notes` and a QR code that opens the address. `.png`, `.jpg` and `.pdf`, light or `--dark`. The password is asked for without echo (or `--password-stdin`); it is only drawn on the picture, never stored, and the file is private to you (mode 600). Needs Pillow; the QR code needs segno.
+
 ## Security
 No password is ever stored. The WebUntis session and the Parent link secret are kept in the macOS Keychain, not in
 files; the data folder is private to your account; the local app server only answers the window the app opened; browser
