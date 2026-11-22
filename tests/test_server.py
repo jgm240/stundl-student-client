@@ -1,4 +1,6 @@
 """SSC Server: config validation, rendering, accounts/roles, the web service and the direct WebUntis sync."""
+import os as _os, tempfile as _tf
+_os.environ.setdefault("SSC_DATA_DIR", _tf.mkdtemp(prefix="ssc-test-"))      # before core is imported: the tests must never touch the real ~/.ssc
 import http.client
 import json
 import os

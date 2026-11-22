@@ -242,7 +242,7 @@ def login(name, password, ip="", con=None, hours=12):
 
 def new_session(name, role, ip="", hours=12, anon=False):
     sid = secrets.token_urlsafe(32)
-    SESSIONS[sid] = dict(name=name, role=role, ip=ip, exp=time.time() + hours * 3600, anon=anon)
+    SESSIONS[sid] = dict(name=name, role=role, ip=ip, at=time.time(), exp=time.time() + hours * 3600, anon=anon)
     return sid
 
 
@@ -263,6 +263,13 @@ def session(sid):
 
 def logout(sid):
     SESSIONS.pop(sid or "", None)
+
+
+def list_sessions():
+    """Who is signed in right now (no session ids: those are secrets)."""
+    now = time.time()
+    return sorted((dict(name=v["name"], role=v["role"], ip=v["ip"], since=v.get("at"), expires=v["exp"], anonymous=bool(v.get("anon"))) for v in SESSIONS.values() if v["exp"] > now),
+                  key=lambda x: (x["name"], x["since"] or 0))
 
 
 def drop_sessions(name):

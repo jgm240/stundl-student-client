@@ -170,6 +170,19 @@ def apply_part(part, cfg, root=None, run=_run):
             schedule.run_up(dict(cfg, schedule=dict(sc, screen_off=True)), run)         # switching the schedule off must never leave the server asleep
             return ["sleep schedule off"]
         return [f"sleep schedule on: {sc['mode']}, off {sc['off']}, on {sc['on']}"]
+    if part.startswith("restart:"):
+        import sysinfo
+        name = part[len("restart:"):]
+        if name not in sysinfo.RESTARTABLE:
+            raise RuntimeError(f"{name} can't be restarted from here")
+        r = run(["systemctl", "restart", name])
+        if r.returncode != 0:
+            raise RuntimeError(f"restarting {name} failed: {(r.stderr or r.stdout).strip()[:150]}")
+        return [f"{name} restarted"]
+    if part in ("reboot", "poweroff"):
+        # a few seconds later, so that this request can still be answered and its result written before the machine goes down
+        run(["systemd-run", "--no-block", "--on-active=5", "systemctl", part])
+        return [("restarting" if part == "reboot" else "powering off") + " in a few seconds"]
     if part == "update":
         import updater
         try:
@@ -209,9 +222,13 @@ ORDER = ("network", "firewall", "ssh", "console", "power", "schedule", "web", "l
 def apply(parts, cfg=None, root=None, run=_run):
     cfg = cfg or serverconf.load()
     done, failed = [], []
-    parts = [p for p in ORDER if p in set(parts)]
+    wanted = set(parts)
+    power = [p for p in ("poweroff", "reboot") if p in wanted][:1]                      # one power action at most, and always last
+    restarts = sorted(p for p in wanted if p.startswith("restart:"))
+    parts = [p for p in ORDER if p in wanted]
     if "links" in parts and "web" in parts:
         parts.remove("links")
+    parts += restarts + power
     for p in parts:
         try:
             done += apply_part(p, cfg, root, run)
@@ -228,7 +245,9 @@ def process_request(root=None, run=_run):
     """The web panel only drops a request file; this runs as root and re-validates everything from server.json."""
     req = serverconf.state_dir() / "apply" / "request.json"
     try:
-        parts = [p for p in json.loads(req.read_text()).get("parts", []) if p in ORDER]
+        import sysinfo
+        ok = lambda p: p in ORDER or p in ("reboot", "poweroff") or (p.startswith("restart:") and p[len("restart:"):] in sysinfo.RESTARTABLE)
+        parts = [p for p in json.loads(req.read_text()).get("parts", []) if isinstance(p, str) and ok(p)]
         req.unlink()
     except (OSError, ValueError):
         return None

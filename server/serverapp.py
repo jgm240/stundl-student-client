@@ -272,6 +272,23 @@ def make_handler():
                 return self.j(200, cfg)
             if u.path == "/api/admin/audit":
                 return self.j(200, auth.audit_log())
+            if u.path == "/api/admin/system":
+                import sysinfo
+                return self.j(200, sysinfo.info(serverconf.system_root()))
+            if u.path == "/api/admin/logs":
+                import sysinfo
+                from urllib.parse import parse_qs
+                q = parse_qs(u.query)
+                try:
+                    return self.j(200, {"unit": q.get("unit", ["web"])[0], "text": sysinfo.journal(q.get("unit", ["web"])[0], int(q.get("n", ["100"])[0]))})
+                except ValueError:
+                    return self.j(400, {"error": "unknown log"})
+            if u.path == "/api/admin/sessions":
+                return self.j(200, auth.list_sessions())
+            if u.path == "/api/admin/backup":
+                import datetime
+                return self.j(200, {"ssc_backup": 1, "version": VERSION, "created": datetime.datetime.now().isoformat(timespec="seconds"),
+                                    "note": "Settings only: no passwords, no accounts, no WebUntis key.", "settings": cfg})
             return self.j(404, {"error": "not found"})
 
         def admin_post(self, u):
@@ -294,6 +311,41 @@ def make_handler():
                         request_apply(parts)
                     auth.audit(auth.db(), who, "settings-changed", ",".join(parts) or "no system change", self.ip())
                     return self.j(200, {"config": new, "apply": parts})
+                if u.path in ("/api/admin/power", "/api/admin/service"):
+                    import sysinfo
+                    if u.path.endswith("power"):
+                        action = str(b.get("action", ""))
+                        if action not in ("reboot", "poweroff"):
+                            raise ValueError("action must be reboot or poweroff")
+                        request_apply([action])
+                        auth.audit(auth.db(), who, "power-" + action, "", self.ip())
+                        return self.j(200, {"requested": action})
+                    name = str(b.get("name", ""))
+                    if name not in sysinfo.RESTARTABLE or b.get("action") != "restart":
+                        raise ValueError("only these can be restarted: " + ", ".join(sysinfo.RESTARTABLE))
+                    request_apply(["restart:" + name])
+                    auth.audit(auth.db(), who, "service-restart", name, self.ip())
+                    return self.j(200, {"requested": name})
+                if u.path == "/api/admin/restore":
+                    old = self.cfg()
+                    data = b.get("settings")
+                    if not isinstance(data, dict):
+                        raise ValueError("that is not a settings backup")
+                    new = serverconf.save(serverconf.merge(json.loads(json.dumps(serverconf.DEFAULTS)), data))
+                    parts = changed_parts(old, new)
+                    if new["links"]["long"] != old["links"]["long"]:
+                        core.save_config({**core.config(), "links_long": new["links"]["long"]})
+                        core.parent_token(rotate=True)
+                    if parts:
+                        request_apply(parts)
+                    auth.audit(auth.db(), who, "settings-restored", ",".join(parts) or "no system change", self.ip())
+                    return self.j(200, {"config": new, "apply": parts})
+                if u.path == "/api/admin/accounts/signout":
+                    name = str(b.get("name", ""))
+                    n = len([1 for v in auth.list_sessions() if v["name"] == name])
+                    auth.drop_sessions(name)
+                    auth.audit(auth.db(), who, "signed-out", f"{name} ({n} session(s))", self.ip())
+                    return self.j(200, {"closed": n})
                 if u.path == "/api/admin/wifi":
                     old = self.cfg()
                     cfg = json.loads(json.dumps(old))

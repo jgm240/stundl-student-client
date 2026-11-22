@@ -1,4 +1,6 @@
 """autoinstall.ssci (SSC Install file), the shared installer questions, sscigen and the installer's auto flow."""
+import os as _os, tempfile as _tf
+_os.environ.setdefault("SSC_DATA_DIR", _tf.mkdtemp(prefix="ssc-test-"))      # before core is imported: the tests must never touch the real ~/.ssc
 import json
 import os
 import stat

@@ -10,6 +10,8 @@
                                                              ssconfig set network.mode static
   ssconfig ip <addr/len> <gateway> [dns,dns]   fixed IP address       ssconfig dhcp   automatic address
   ssconfig schedule set 22:00 06:00|disable|status   switch off at night, disks to sleep, back on in the morning
+  ssconfig system | reboot | poweroff   health of this machine; restart or power it off
+  ssconfig backup [FILE] | restore FILE    save / put back the settings
   ssconfig update [--install|--rollback]   check for / install a newer SSC from GitHub
   ssconfig lid ignore|suspend|poweroff|status   what closing a laptop lid does (ignore = keep running)
   ssconfig sleep block|allow    never (or sometimes) suspend
@@ -260,6 +262,73 @@ def cmd_schedule(args):
         return 1
     print(cmd_schedule.__doc__)
     return 2
+
+
+def cmd_power(action, args):
+    """ssconfig reboot | poweroff   (asks first; --yes skips the question)"""
+    if os.geteuid() != 0:
+        print("this needs root (ssconfig runs it with sudo)")
+        return 1
+    if "--yes" not in args and input(f"{'Restart' if action == 'reboot' else 'Power off'} this server now? [y/N] ").strip().lower() not in ("y", "yes"):
+        print("Cancelled.")
+        return 1
+    subprocess.run(["systemctl", action])
+    return 0
+
+
+def cmd_system(_=None):
+    import sysinfo
+    i = sysinfo.info(serverconf.system_root())
+    up = int(i["uptime_s"] or 0)
+    print(f"{i['os']} - kernel {i['kernel']} ({i['machine']})")
+    print(f"Time: {i['time']} ({i['timezone']})   Up: {up // 86400}d {up % 86400 // 3600}h {up % 3600 // 60}m   Load: {i['load']}")
+    if i["memory"]:
+        print(f"Memory: {i['memory']['used_mb']} / {i['memory']['total_mb']} MB ({i['memory']['percent']}%)")
+    if i["disk"]:
+        print(f"Disk: {i['disk']['used_gb']} / {i['disk']['total_gb']} GB ({i['disk']['percent']}%)")
+    for t in i["temperatures"]:
+        print(f"Temperature {t['name']}: {t['celsius']} C")
+    if i["battery"]:
+        print(f"Battery: {i['battery']['percent']}% {i['battery']['status']}, charger {'connected' if i['battery']['ac_online'] else 'not connected'}")
+    for sv in i["services"]:
+        print(f"  {sv['state']:<10} {sv['label']}")
+    return 0
+
+
+def cmd_backup(args):
+    """ssconfig backup [FILE]   settings only (no passwords, accounts or WebUntis key); to stdout without FILE"""
+    import datetime
+    from ssc_version import VERSION
+    text = json.dumps({"ssc_backup": 1, "version": VERSION, "created": datetime.datetime.now().isoformat(timespec="seconds"), "settings": serverconf.load()}, indent=2)
+    if args:
+        fd = os.open(args[0], os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w") as f:
+            f.write(text + "\n")
+        print("Wrote", args[0])
+    else:
+        print(text)
+    return 0
+
+
+def cmd_restore(args):
+    """ssconfig restore FILE   put the settings of a backup back (checked first; system parts are applied)"""
+    if not args:
+        print("usage: ssconfig restore FILE")
+        return 2
+    try:
+        data = json.loads(Path(args[0]).read_text())["settings"]
+        old = serverconf.load()
+        new = serverconf.save(serverconf.merge(json.loads(json.dumps(serverconf.DEFAULTS)), data))
+    except (OSError, ValueError, KeyError, TypeError) as e:
+        print("Can't restore:", e)
+        return 1
+    if new["links"]["long"] != old["links"]["long"]:
+        core.save_config({**core.config(), "links_long": new["links"]["long"]})
+        core.parent_token(rotate=True)
+    fix_owner()
+    apply_parts(sorted(set(changed(old, new))))
+    print("Settings restored.")
+    return 0
 
 
 def cmd_update(args):
@@ -728,6 +797,14 @@ def main(argv=None):
             return cmd_lid(rest)
         if c == "update":
             return cmd_update(rest)
+        if c in ("reboot", "poweroff"):
+            return cmd_power(c, rest)
+        if c == "system":
+            return cmd_system()
+        if c == "backup":
+            return cmd_backup(rest)
+        if c == "restore":
+            return cmd_restore(rest)
         if c == "schedule":
             return cmd_schedule(rest)
         if c == "sleep":

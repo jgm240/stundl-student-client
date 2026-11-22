@@ -1,4 +1,6 @@
 """The updater: only GitHub, only on request, checksums enforced, safe unpacking, staged install with roll-back."""
+import os as _os, tempfile as _tf
+_os.environ.setdefault("SSC_DATA_DIR", _tf.mkdtemp(prefix="ssc-test-"))      # before core is imported: the tests must never touch the real ~/.ssc
 import hashlib
 import http.server
 import io
