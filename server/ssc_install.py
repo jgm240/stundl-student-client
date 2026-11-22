@@ -135,6 +135,11 @@ def install(ans, run, root=TARGET, efi=None, a=None):
         ch("passwd", "-l", "root")
         ch("systemctl", "enable", "ssc-server", "ssc-apply.path", "ssc-banner", "nftables", "ssh", "ssc-sync.timer", check=False)
 
+        # the installed system must show a login prompt on the screen (tty1), not a blank cursor
+        ch("systemctl", "enable", "getty@tty1.service", check=False)
+        if not run.dry and not (root / "etc/systemd/system/getty.target.wants/getty@tty1.service").exists():
+            raise RuntimeError("the console login (getty@tty1) is not enabled in the installed system")
+
         step("Removing the live-system parts")
         ch("sh", "-c", "apt-get -y purge live-boot live-boot-initramfs-tools live-config live-config-systemd live-config-sysvinit 2>/dev/null || "
                        "dpkg --purge --force-depends live-boot live-boot-initramfs-tools live-config live-config-systemd || true")

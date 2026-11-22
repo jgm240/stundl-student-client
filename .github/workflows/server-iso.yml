@@ -5,7 +5,7 @@ on:
     inputs:
       version:
         description: "Version label for the file names"
-        default: "1.0.0-beta.3"
+        default: "1.0.0-beta.4"
   push:
     paths: ["server/**", "tests/test_server.py", "tests/iso/**", ".github/workflows/server-iso.yml", "untis_direct.py"]
 
@@ -68,5 +68,4 @@ jobs:
         run: tests/iso/qemu_test.sh install "$(ls iso/*.iso)" ${{ matrix.arch }}
       - name: Install to disk (UEFI, 64-bit only)
         if: matrix.arch == 'amd64'
-        continue-on-error: true
         run: UEFI=1 tests/iso/qemu_test.sh install "$(ls iso/*.iso)" amd64
