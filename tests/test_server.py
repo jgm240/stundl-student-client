@@ -328,6 +328,19 @@ class ServerTests(unittest.TestCase):
         a.req("POST", "/api/watch/forget", {})
         self.assertIsNone(json.loads(a.req("GET", "/api/watch")[1])["address"])
 
+    def test_admin_untis_with_fields_and_clear_error_messages(self):
+        a = Client(self.port)
+        a.login("boss", "twelve-chars!")
+        s, b, _ = a.req("POST", "/api/admin/untis", {"qr": "untis://setschool?url=a.webuntis.com&school=s&user=u&key=ABCD0189"})
+        self.assertEqual(s, 400)
+        self.assertIn("0 1 8 9", b)
+        s, b, _ = a.req("POST", "/api/admin/untis", {"server": "a.webuntis.com", "school": "s", "user": "u"})
+        self.assertEqual(s, 400)
+        self.assertIn("key", b)
+        s, b, _ = a.req("POST", "/api/admin/untis", {"server": "a.webuntis.com", "school": "s", "user": "u", "key": "ABCD EFGH"})
+        self.assertEqual(s, 200)
+        a.req("POST", "/api/admin/untis/clear", {})
+
     def test_logout_ends_the_session(self):
         c = Client(self.port)
         c.login("anna", "longenoughpw")
@@ -887,3 +900,52 @@ class ImageCommandsTests(unittest.TestCase):
         sh = (ROOT / "server/iso/overlay/usr/local/bin/ssconfig").read_text()
         self.assertIn("exec sudo", sh)                       # plain `ssconfig` works for the admin user, no `sudo` needed
         self.assertIn("/opt/ssc/server/ssconfig.py", sh)
+
+
+class UntisInputTests(unittest.TestCase):
+    BASE = "untis://setschool?url=mese.webuntis.com&school=My%20School&user=anna.m&key="
+
+    def setUp(self):
+        isolate()
+        import untis_direct
+        self.u = untis_direct
+
+    def test_forgiving_about_how_the_key_and_link_were_copied(self):
+        for link in (self.BASE + "ABCDEFGHIJKLMNOP", self.BASE + "abcd efgh ijkl mnop", self.BASE + "ABCD-EFGH-IJKL-MNOP", "'" + self.BASE + "ABCDEFGHIJKLMNOP'",
+                     "<" + self.BASE + "ABCDEFGHIJKLMNOP>", "untis://setschool?url=https://mese.webuntis.com/WebUntis/&school=x&user=a&key=ABCDEFGHIJKLMNOP"):
+            c = self.u.parse_qr(link)
+            self.assertIsNotNone(c, link)
+            self.assertEqual(c["key"], "ABCDEFGHIJKLMNOP")
+            self.assertEqual(c["server"], "mese.webuntis.com")
+        self.assertEqual(self.u.parse_qr(self.BASE + "ABCDEFGHIJKLMNOP")["school"], "My School")
+
+    def test_errors_name_the_part_that_is_wrong(self):
+        self.assertIn("0 1 8 9", self.u.explain_qr(self.BASE + "ABCD0189"))
+        self.assertIn("untis://", self.u.explain_qr("https://x.com/?url=a"))
+        self.assertIn("school", self.u.explain_qr("untis://setschool?url=a.webuntis.com&user=u&key=ABCDEFGH"))
+        self.assertIn("key", self.u.explain_qr("untis://setschool?url=a.webuntis.com&school=s&user=u"))
+        self.assertIn("nothing", self.u.explain_qr("  "))
+        self.assertEqual(self.u.explain_qr(self.BASE + "ABCDEFGHIJKLMNOP"), "")
+        self.assertIsNone(self.u.parse_qr(self.BASE + "ABCD0189"))
+
+    def test_four_separate_values(self):
+        c = self.u.check_credentials("https://mese.webuntis.com/WebUntis/", " My School ", "anna.m", "abcd efgh")
+        self.assertEqual(c, dict(server="mese.webuntis.com", school="My School", user="anna.m", key="ABCDEFGH"))
+        for bad in (("", "s", "u", "ABCDEFGH"), ("localhost", "s", "u", "ABCDEFGH"), ("a.b.com", "", "u", "ABCDEFGH"), ("a.b.com", "s", "", "ABCDEFGH"), ("a.b.com", "s", "u", ""), ("a.b.com", "s", "u", "ABC!")):
+            with self.assertRaises(ValueError, msg=str(bad)):
+                self.u.check_credentials(*bad)
+
+    def test_login_hint(self):
+        self.assertIn("login name", self.u.login_hint("bad credentials"))
+        self.assertEqual(self.u.login_hint("something unrelated"), "")
+
+    def test_ssc_untis_command_with_fields(self):
+        import subprocess
+        env = dict(os.environ, SSC_VAULT="file")
+        r = subprocess.run([sys.executable, str(ROOT / "ssc.py"), "untis", "set", "--server", "a.webuntis.com", "--school", "s", "--user", "u", "--key", "ABCDEFGH"],
+                           capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("u @ s", r.stdout)
+        r = subprocess.run([sys.executable, str(ROOT / "ssc.py"), "untis", "set", self.BASE + "ABCD0189"], capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("0 1 8 9", r.stderr)

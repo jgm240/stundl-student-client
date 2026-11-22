@@ -389,15 +389,33 @@ def cmd_account(args):
 
 def cmd_untis(_=None):
     import untis_direct
-    print("Paste the Untis Mobile QR text (untis://setschool?...). In WebUntis: Profile > Access > Untis Mobile > show QR.")
-    cfg = untis_direct.parse_qr(input("> ").strip())
-    if not cfg:
-        print("That doesn't look like an Untis Mobile QR text.")
-        return 1
+    print("Paste the Untis Mobile link (untis://setschool?...), or just press Enter to type the four values one by one.")
+    text = input("> ").strip()
+    if text:
+        cfg = untis_direct.parse_qr(text)
+        if not cfg:
+            print("That link doesn't work:", untis_direct.explain_qr(text))
+            return 1
+    else:
+        try:
+            cfg = untis_direct.check_credentials(input("Server (e.g. xyz.webuntis.com): "), input("School login name (?school=... in the WebUntis address): "),
+                                                 input("User name: "), getpass.getpass("Key (not shown): "))
+        except ValueError as e:
+            print("Can't use these values -", e)
+            return 1
     untis_direct.save_credentials(cfg)
     core.save_config({**core.config(), "sync_mode": "direct"})
     fix_owner()
-    print("Saved for", cfg["user"], "at", cfg["school"])
+    print("Saved for", cfg["user"], "at", cfg["school"], "- testing the login...")
+    try:
+        untis_direct.call(cfg, "getUserData2017")
+        print("Login OK.")
+    except untis_direct.UntisError as e:
+        print("WebUntis refused it:", e)
+        print(untis_direct.login_hint(e))
+        return 1
+    except OSError as e:
+        print("Saved, but this server can't reach", cfg["server"], "right now:", e)
     return 0
 
 

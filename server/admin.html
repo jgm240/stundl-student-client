@@ -107,9 +107,12 @@ Power:()=>`<h1>Power</h1><p class="sub">For old laptops used as servers: keep ru
  <p class="sub">With the lid closed the laptop gets warm: keep the vents free and plug it in. Whether the screen turns off with the lid is up to the laptop's hardware.</p></div>`,
 WebUntis:()=>`<h1>WebUntis</h1><p class="sub">The server logs in to WebUntis by itself with the <b>Untis Mobile</b> key (no browser, no password).</p>
  <div class="card"><div class="kv"><span>Connected as</span><b>${esc(S.untis||"nobody yet")}</b></div><div class="kv"><span>Last update</span><b>${when(S.synced_at)}</b></div>
- <div class="row"><div style="flex:1"><label>Untis Mobile QR text - WebUntis → Profile → Freigaben / Access → Untis Mobile → scan the QR code with a phone camera and paste the text (starts with untis://setschool?…)</label>
+ <div class="row"><div style="flex:1"><label>Option 1 - the Untis Mobile link: WebUntis → Profile → Freigaben / Access → Untis Mobile → scan the QR code with a phone camera and paste the text (starts with untis://setschool?…)</label>
  <input id="qr" style="width:100%" type="password" placeholder="untis://setschool?url=…" autocomplete="off"></div></div>
- <div class="row"><button class="b p" onclick="run(()=>api('/api/admin/untis',{qr:$('#qr').value}).then(()=>$('#qr').value=''),'Key saved - syncing')">Save key</button>
+ <p class="sub" style="margin:6px 0">Option 2 - only have the key? Fill in the four values instead:</p>
+ <div class="row"><div><label>Server</label><input id="us" placeholder="xyz.webuntis.com" autocomplete="off"></div><div><label>School login name (?school=… in the WebUntis address)</label><input id="uc" autocomplete="off"></div>
+ <div><label>User name</label><input id="uu" autocomplete="off"></div><div><label>Key</label><input id="uk" type="password" autocomplete="off"></div></div>
+ <div class="row"><button class="b p" onclick="saveUntis()">Save and test</button>
  <button class="b" onclick="run(()=>api('/api/admin/sync',{}),'Sync started')">Sync now</button>
  ${S.untis?`<button class="b d" onclick="if(confirm('Remove the key?'))run(()=>api('/api/admin/untis/clear',{}),'Removed')">Remove key</button>`:""}</div>
  <div class="row"><label style="display:inline-flex;gap:8px;align-items:center;color:var(--text)">Update every <input id="sm" type="number" value="${C.sync.minutes}" style="width:80px"> minutes</label><button class="b" onclick="cfg({sync:{minutes:+$('#sm').value}},'Saved')">Save</button></div>
@@ -119,6 +122,10 @@ function newpw(n){const p=prompt("New password for "+n+":");if(p)run(()=>api("/a
 function saveSections(){const g=r=>[...document.querySelectorAll(`input[data-r=${r}]:checked`)].map(i=>i.value);cfg({sections:{guest:g("guest"),user:g("user")}},"Saved")}
 function saveNet(){cfg({network:{hostname:$("#hn").value,mode:$("#nm").value,interface:$("#if").value,address:$("#ad")?$("#ad").value:"",gateway:$("#gw")?$("#gw").value:"",dns:($("#dn")?$("#dn").value:"")}},"Saved - applying…")}
 function saveWifi(){run(()=>api("/api/admin/wifi",{enabled:$("#wfe").checked,ssid:$("#wfs").value,passphrase:$("#wfp").value,country:$("#wfc").value,open:$("#wfo").checked,hidden:$("#wfh").checked}),"Saved - connecting…")}
+async function saveUntis(){const qr=$("#qr").value.trim();
+  const body=qr?{qr,test:true}:{server:$("#us").value,school:$("#uc").value,user:$("#uu").value,key:$("#uk").value,test:true};
+  say("Saving and testing the login…");
+  try{const r=await api("/api/admin/untis",body);say(r.message||"Saved",r.tested!==false);$("#qr").value="";$("#uk").value="";setTimeout(()=>show("WebUntis"),2500)}catch(e){say(e.message,false)}}
 function savePower(){cfg({power:{lid:$("#pl").value,block_sleep:$("#pb").checked}},"Saved - applying…")}
 function saveAuto(){cfg({console:{autologin_user:$("#ale").checked?$("#alu").value.trim():""}},"Saved - applies at the next boot")}
 function saveWeb(){cfg({web:{port:+$("#wp").value,bind:$("#wb").value,session_hours:+$("#sh").value,https:$("#hs").checked},firewall:{enabled:$("#fw").checked}},"Saved - the service restarts")}

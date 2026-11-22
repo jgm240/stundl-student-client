@@ -365,24 +365,40 @@ def cmd_pinetime(a):
         print(pinetime.sync(test=a.action == "test"))
 
 
+def _untis_credentials(a):
+    """From the link given as the argument, or from --server/--school/--user (+ --key, asked for without echo)."""
+    import untis_direct, getpass
+    if a.value:
+        cfg = untis_direct.parse_qr(a.value)
+        if not cfg:
+            sys.exit("That link doesn't work: " + untis_direct.explain_qr(a.value))
+        return cfg
+    if a.server or a.school or a.user or a.key:
+        key = a.key or getpass.getpass("Untis Mobile key (not shown): ")
+        try:
+            return untis_direct.check_credentials(a.server, a.school, a.user, key)
+        except ValueError as e:
+            sys.exit("Can't use these values - " + str(e))
+    sys.exit("Give the untis:// link, or --server, --school and --user (the key is asked for).")
+
+
 def cmd_untis(a):
     import untis_direct
     if a.action == "set":
-        cfg = untis_direct.parse_qr(a.value or "")
-        if not cfg:
-            sys.exit("That isn't an Untis Mobile QR text (untis://setschool?url=...&school=...&user=...&key=...)")
+        cfg = _untis_credentials(a)
         untis_direct.save_credentials(cfg)
-        print("Saved:", untis_direct.describe())
+        print("Saved:", untis_direct.describe(), " - check it with:  ssc untis test")
     elif a.action == "clear":
         untis_direct.clear_credentials(); print("Removed.")
     elif a.action == "test":
+        cfg = untis_direct.load_credentials() or sys.exit("No key set. Use:  ssc untis set 'untis://setschool?...'")
         try:
-            untis_direct.call(untis_direct.load_credentials() or sys.exit("No key set."), "getUserData2017")
+            untis_direct.call(cfg, "getUserData2017")
             print("Login OK.")
         except untis_direct.UntisError as e:
-            sys.exit(f"Login failed: {e}")
+            sys.exit(f"Login failed: {e}\n{untis_direct.login_hint(e)}".rstrip())
         except OSError as e:
-            sys.exit(f"Can't reach WebUntis: {e}")
+            sys.exit(f"Can't reach {cfg['server']}: {e}")
     else:
         print(untis_direct.describe() or "No Untis Mobile key set.")
 
@@ -1026,7 +1042,9 @@ def main():
     x.add_argument("--time", default="06:45", help="daily sync time")
     x.add_argument("--remind-time", default="17:30", help="daily reminder time"); x.set_defaults(f=cmd_schedule)
     x = sp.add_parser("untis", help="the Untis Mobile key for headless syncing (SSC Server)")
-    x.add_argument("action", choices=["set", "test", "clear", "status"]); x.add_argument("value", nargs="?"); x.set_defaults(f=cmd_untis)
+    x.add_argument("action", choices=["set", "test", "clear", "status"]); x.add_argument("value", nargs="?", help="the untis://setschool?... link")
+    x.add_argument("--server", help="e.g. xyz.webuntis.com"); x.add_argument("--school", help="the school's login name (?school=... in the WebUntis address)")
+    x.add_argument("--user"); x.add_argument("--key", help="(better leave it out: it is then asked for without showing it)"); x.set_defaults(f=cmd_untis)
     x = sp.add_parser("plan", help="your study plan (shown in Parent mode)")
     x.add_argument("action", nargs="?", default="list", choices=["list", "add", "done", "undone", "edit", "rm"]); x.add_argument("arg", nargs="*")
     x.add_argument("--date"); x.add_argument("--time"); x.add_argument("--minutes", type=int); x.add_argument("--subject"); x.add_argument("--notes")

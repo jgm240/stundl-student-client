@@ -273,12 +273,23 @@ def make_handler():
                     auth.set_disabled(str(b.get("name", "")), bool(b.get("disabled")), who=who)
                 elif u.path == "/api/admin/untis":
                     import untis_direct
-                    cfg = untis_direct.parse_qr(str(b.get("qr", "")))
-                    if not cfg:
-                        raise ValueError("That isn't an Untis Mobile QR text (untis://setschool?url=...&school=...&user=...&key=...)")
+                    if b.get("qr"):
+                        cfg = untis_direct.parse_qr(str(b["qr"]))
+                        if not cfg:
+                            raise ValueError("That link doesn't work: " + untis_direct.explain_qr(str(b["qr"])))
+                    else:
+                        cfg = untis_direct.check_credentials(b.get("server"), b.get("school"), b.get("user"), b.get("key"))
                     untis_direct.save_credentials(cfg)
                     core.save_config({**core.config(), "sync_mode": "direct"})
                     auth.audit(auth.db(), who, "untis-key-set", cfg["user"] + " @ " + cfg["school"], self.ip())
+                    if b.get("test"):                          # "save and test": say right away whether WebUntis accepts it
+                        try:
+                            untis_direct.call(cfg, "getUserData2017")
+                            return self.j(200, {"ok": True, "tested": True, "message": "Saved. WebUntis accepted the key."})
+                        except untis_direct.UntisError as e:
+                            return self.j(200, {"ok": True, "tested": False, "message": f"Saved, but WebUntis refused it: {e}. " + untis_direct.login_hint(e)})
+                        except OSError as e:
+                            return self.j(200, {"ok": True, "tested": False, "message": f"Saved, but this server can't reach {cfg['server']}: {e}"})
                 elif u.path == "/api/admin/untis/clear":
                     import untis_direct
                     untis_direct.clear_credentials()

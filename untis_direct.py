@@ -10,6 +10,7 @@ import base64
 import hashlib
 import hmac
 import json
+import re
 import struct
 import time
 import urllib.error
@@ -32,19 +33,79 @@ class AuthError(UntisError):
 
 
 # ---------------------------------------------------------------- credentials (the secret key lives in the vault only)
-def parse_qr(text):
-    u = urllib.parse.urlparse((text or "").strip())
-    if u.scheme != "untis":
-        return None
-    q = {k: v[0] for k, v in urllib.parse.parse_qs(u.query).items()}
-    server = (q.get("url") or "").replace("https://", "").replace("http://", "").strip("/")
-    if not (server and q.get("school") and q.get("user") and q.get("key")):
-        return None
+B32_CHARS = set("ABCDEFGHIJKLMNOPQRSTUVWXYZ234567")
+
+
+def clean_key(key):
+    """Spaces, dashes and lower case are fine (people copy keys in groups of four); padding is added where needed."""
+    k = re.sub(r"[\s\-]+", "", str(key or "")).upper().rstrip("=")
+    return k
+
+
+def check_credentials(server, school, user, key):
+    """-> the credentials dict, or ValueError that says exactly which part is wrong."""
+    server = re.sub(r"^https?://", "", str(server or "").strip().strip("'\"`<>")).split("/")[0].strip()
+    school, user = str(school or "").strip(), str(user or "").strip()
+    k = clean_key(key)
+    if not server or "." not in server:
+        raise ValueError("server: the WebUntis address, like xyz.webuntis.com (from the address bar when you're signed in)")
+    if not school:
+        raise ValueError("school: the school's login name (the text after ?school= in the WebUntis address)")
+    if not user:
+        raise ValueError("user: your WebUntis user name")
+    if not k:
+        raise ValueError("key: the secret key is missing")
+    bad = sorted({c for c in k if c not in B32_CHARS})
+    if bad:
+        raise ValueError("key: only the letters A-Z and the digits 2-7 are valid in an Untis Mobile key; found: " + " ".join(bad)
+                         + ("  (0, 1, 8 and 9 never appear - check for look-alike letters O, I, B, g)" if set(bad) & set("0189") else ""))
     try:
-        _b32(q["key"])
+        _b32(k)
     except Exception:
+        raise ValueError("key: not a valid Untis Mobile key (it may be cut off - copy all of it)")
+    return dict(server=server, school=school, user=user, key=k)
+
+
+def explain_qr(text):
+    """Why a pasted link was not accepted ('' if it is fine)."""
+    t = str(text or "").strip().strip("'\"`<>").strip()
+    if not t:
+        return "nothing was pasted"
+    u = urllib.parse.urlparse(t)
+    q = {k: v[0] for k, v in urllib.parse.parse_qs(u.query if u.scheme else t).items()}
+    if u.scheme and u.scheme != "untis":
+        return "the link should start with untis:// (yours starts with %s://)" % u.scheme
+    if not q:
+        return "no settings found after the ?  - the link looks like untis://setschool?url=...&school=...&user=...&key=..."
+    try:
+        check_credentials(q.get("url", ""), q.get("school", ""), q.get("user", ""), q.get("key", ""))
+    except ValueError as e:
+        return str(e).replace("server:", "url:", 1)
+    return ""
+
+
+def parse_qr(text):
+    """untis://setschool?url=SERVER&school=SCHOOL&user=USER&key=KEY  (also accepts it without the scheme, in quotes, and a
+    key typed in groups). None if it can't be used - explain_qr() says why."""
+    t = str(text or "").strip().strip("'\"`<>").strip()
+    u = urllib.parse.urlparse(t)
+    if u.scheme and u.scheme != "untis":
         return None
-    return dict(server=server, school=q["school"], user=q["user"], key=q["key"])
+    q = {k: v[0] for k, v in urllib.parse.parse_qs(u.query if u.scheme else t).items()}
+    try:
+        return check_credentials(q.get("url", ""), q.get("school", ""), q.get("user", ""), q.get("key", ""))
+    except ValueError:
+        return None
+
+
+def login_hint(msg):
+    """A plain-language hint for the usual reasons WebUntis refuses the login."""
+    m = str(msg).lower()
+    if "auth" in m or "login" in m or "credential" in m or "password" in m:
+        return ("WebUntis refused the key. Check: (1) the school name is the *login name* from the WebUntis address (?school=...), "
+                "(2) the user name is exactly the one you sign in with, (3) the key wasn't revoked - making a new QR code in WebUntis "
+                "invalidates the old key, (4) the key is the whole secret, copied completely.")
+    return ""
 
 
 def save_credentials(cfg):
