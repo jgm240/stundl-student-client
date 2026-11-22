@@ -101,6 +101,35 @@ class ImgenTests(unittest.TestCase):
         self.assertEqual(self.run_cli("--user", "a", "--address", "1.2.3.4:80", "--password-stdin", "--lang", "de", "-o", str(d / "a.png"), stdin="pw1234\n")[0], 0)
         self.assertEqual(self.run_cli("--user", "a", "--address", "1.2.3.4:80", "--password-stdin", "--lang", "klingon", "-o", str(d / "b.png"), stdin="pw1234\n")[0], 1)
 
+    def amber(self, img, box):
+        px = img.crop(box).convert("RGB")
+        return sum(1 for r, g, b in px.getdata() if r > 200 and 120 < g < 200 and b < 90)
+
+    def test_cellular_warning(self):
+        box = (60, 560, 990, 730)
+        self.assertLess(self.amber(self.card(), box), 20)                          # off by default
+        warn = self.card(cellular_warn=True)
+        self.assertGreater(self.amber(warn, box), 400)                             # the amber triangle and band
+        self.assertEqual(warn.size, (1500, 900))
+        for code in im.STRINGS:
+            self.assertTrue(im.STRINGS[code]["cellular"].strip(), code)
+        self.assertEqual(im.STRINGS["en"]["cellular"], "Connect to WiFi instead of mobile data to access SSC")
+        self.assertNotEqual(self.card(cellular_warn=True, lang="de").tobytes(), warn.tobytes())
+
+    def test_cellular_warning_fits_with_everything_else(self):
+        # all optional parts at once, longest language: nothing may run into the footer line
+        for code in ("de", "pl", "fr", "es"):
+            c = self.card(cellular_warn=True, notes="Line one\nLine two", lang=code)
+            self.assertLess(dark_pixels(c, (60, 836, 1440, 846)), 5, code)         # clear gap above the footer text
+            self.assertEqual(c.size, (1500, 900))
+        c = self.card(cellular_warn=True, notes="n", qr=False, dark=True)
+        self.assertGreater(self.amber(c, (60, 560, 1440, 730)), 400)
+
+    def test_cli_cellularwarn(self):
+        d = Path(tempfile.mkdtemp())
+        self.assertEqual(self.run_cli("--user", "a", "--address", "1.2.3.4:80", "--password-stdin", "--cellularwarn", "-o", str(d / "w.png"), stdin="pw1234\n")[0], 0)
+        self.assertTrue((d / "w.png").exists())
+
     def test_validation(self):
         for bad in (dict(user=""), dict(password=""), dict(address="not an address"), dict(address="http://1.2.3.4:80")):
             with self.assertRaises(im.CardError, msg=str(bad)):
