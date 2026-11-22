@@ -153,7 +153,7 @@ def cmd_banner(_=None):
     urls = serverconf.server_urls(cfg, addresses())
     lines = ["", "  SSC Server  -  " + cfg["network"]["hostname"],
              "  Web:  " + (", ".join(urls) if urls else "(waiting for a network address)"),
-             "  Show the Parent link:   sudo ssconfig showlink      Settings:   sudo ssconfig", ""]
+             "  Show the Parent link:   ssconfig showlink      Settings:   ssconfig", ""]
     root = serverconf.system_root()
     p = root / "etc/issue.d/20-ssc.issue"
     p.parent.mkdir(parents=True, exist_ok=True)

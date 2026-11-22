@@ -851,3 +851,23 @@ class PowerTests(unittest.TestCase):
         self.assertEqual(ssconfig.main(["lid", "ignore"]), 0)
         self.assertEqual(ssconfig.main(["sleep", "block"]), 0)
         self.assertEqual(serverconf.load()["power"], {"lid": "ignore", "block_sleep": True})
+
+
+class ImageCommandsTests(unittest.TestCase):
+    def test_commands_are_on_every_users_path(self):
+        # Debian: normal users have /usr/local/bin on PATH but not /usr/local/sbin, so `ssconfig` would be "command not found"
+        for c in ("ssconfig", "ssc-install", "ssc-imgen"):
+            f = ROOT / "server/iso/overlay/usr/local/bin" / c
+            self.assertTrue(f.exists(), c)
+            self.assertTrue(os.access(f, os.X_OK), c)
+            self.assertTrue(f.read_text().startswith("#!/bin/sh"), c)
+            self.assertFalse((ROOT / "server/iso/overlay/usr/local/sbin" / c).exists(), c)
+        unit = (ROOT / "server/iso/overlay/etc/systemd/system/ssc-autoinstall.service").read_text()
+        self.assertIn("/usr/local/bin/ssc-install --auto", unit)
+        self.assertTrue((ROOT / "server/iso/overlay/usr/local/sbin/ssc-live-menu").exists())        # root-only service script stays
+        self.assertIn("/usr/local/sbin/ssc-live-menu", (ROOT / "server/iso/overlay/etc/systemd/system/ssc-live-console.service").read_text())
+
+    def test_ssconfig_wrapper_escalates_itself(self):
+        sh = (ROOT / "server/iso/overlay/usr/local/bin/ssconfig").read_text()
+        self.assertIn("exec sudo", sh)                       # plain `ssconfig` works for the admin user, no `sudo` needed
+        self.assertIn("/opt/ssc/server/ssconfig.py", sh)

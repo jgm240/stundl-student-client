@@ -44,6 +44,8 @@ cd "$WORK"
 cp "$HERE/hooks/"* config/hooks/normal/
 
 lb build 2>&1 | tail -n 200
+# the commands must be on every user's PATH (Debian's normal users have /usr/local/bin but not the sbin folders)
+for c in ssconfig ssc-install ssc-imgen; do [ -x "chroot/usr/local/bin/$c" ] || { echo "MISSING command in the image: /usr/local/bin/$c"; exit 1; }; done
 ls -l binary/live/initrd.img* 2>/dev/null || true
 ISO=$(ls ./*.iso | head -1)
 OUT="${OUT:-$REPO/dist}"; mkdir -p "$OUT"

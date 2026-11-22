@@ -9,7 +9,7 @@ Before=ssc-live-console.service
 Type=oneshot
 StandardOutput=journal+console
 StandardError=journal+console
-ExecStart=/usr/local/sbin/ssc-install --auto
+ExecStart=/usr/local/bin/ssc-install --auto
 
 [Install]
 WantedBy=multi-user.target
