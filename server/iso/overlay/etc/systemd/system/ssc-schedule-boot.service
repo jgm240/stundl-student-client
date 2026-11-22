@@ -1,0 +1,11 @@
+[Unit]
+Description=SSC Server: go back to sleep if started inside the sleep period
+After=multi-user.target ssc-server.service
+
+[Service]
+Type=oneshot
+Environment=SSC_DATA_DIR=/var/lib/ssc SSC_VAULT=file
+ExecStart=/usr/bin/python3 /opt/ssc/server/ssconfig.py schedule check
+
+[Install]
+WantedBy=multi-user.target

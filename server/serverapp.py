@@ -58,6 +58,27 @@ def apply_result():
         return None
 
 
+def parse_who(text):
+    """`who` output -> [{user, tty}] (who is logged in on which terminal)."""
+    out = []
+    for line in str(text).splitlines():
+        parts = line.split()
+        if len(parts) >= 2:
+            out.append({"user": parts[0], "tty": parts[1]})
+    return out
+
+
+def console_info():
+    """Is there a login on the machine's own screen (tty1), and who is logged in there? (Shown in the admin panel; the install tests check it.)"""
+    info = {"getty": "unknown", "logged_in": []}
+    try:
+        info["getty"] = subprocess.run(["systemctl", "is-active", "getty@tty1.service"], capture_output=True, text=True, timeout=5).stdout.strip() or "unknown"
+        info["logged_in"] = parse_who(subprocess.run(["who"], capture_output=True, text=True, timeout=5).stdout)
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return info
+
+
 def _wifi_card():
     try:
         import applycfg
@@ -71,7 +92,7 @@ PARTS = {"network": ("network",), "ssh": ("ssh",), "firewall": ("firewall",), "w
 
 def changed_parts(old, new):
     parts = []
-    for k in ("network", "ssh", "firewall", "web", "links", "console", "power"):
+    for k in ("network", "ssh", "firewall", "web", "links", "console", "power", "schedule"):
         if old[k] != new[k]:
             parts.append(k)
     if old["wifi"] != new["wifi"] and "network" not in parts:
@@ -246,7 +267,7 @@ def make_handler():
                                     "urls": serverconf.server_urls(cfg, addrs), "hostname": cfg["network"]["hostname"], "links": links,
                                     "accounts": auth.accounts(), "untis": untis_direct.describe(), "synced_at": state["synced_at"],
                                     "apply": apply_result(), "sync": ssc.SYNC,
-                                    "wifi_card": _wifi_card()})
+                                    "wifi_card": _wifi_card(), "console": console_info()})
             if u.path == "/api/admin/config":
                 return self.j(200, cfg)
             if u.path == "/api/admin/audit":

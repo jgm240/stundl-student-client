@@ -107,7 +107,17 @@ Power:()=>`<h1>Power</h1><p class="sub">For old laptops used as servers: keep ru
  <div class="card"><div class="row"><div><label>When the lid is closed</label><select id="pl"><option value="ignore" ${C.power.lid==="ignore"?"selected":""}>Do nothing - keep running</option><option value="suspend" ${C.power.lid==="suspend"?"selected":""}>Suspend</option><option value="poweroff" ${C.power.lid==="poweroff"?"selected":""}>Power off</option></select></div></div>
  <div class="row"><label style="display:inline-flex;gap:8px;align-items:center;color:var(--text)">${chk("pb",C.power.block_sleep)} Never suspend or hibernate (also ignores the sleep keys and idle timeouts)</label></div>
  <div class="row"><button class="b p" onclick="savePower()">Save and apply</button></div>
- <p class="sub">With the lid closed the laptop gets warm: keep the vents free and plug it in. Whether the screen turns off with the lid is up to the laptop's hardware.</p></div>`,
+ <p class="sub">With the lid closed the laptop gets warm: keep the vents free and plug it in. Whether the screen turns off with the lid is up to the laptop's hardware.</p></div>
+ <h2>Sleep schedule</h2><div class="card"><p class="sub" style="margin-top:0">Switch everything off at night and back on in the morning. Times are the server's local time.</p>
+ <div class="row"><label style="display:inline-flex;gap:8px;align-items:center;color:var(--text)">${chk("sce",C.schedule.enabled)} Use a sleep schedule</label></div>
+ <div class="row"><div><label>Switch off at</label><input id="sco" type="time" value="${esc(C.schedule.off)}"></div><div><label>Switch back on at</label><input id="scn" type="time" value="${esc(C.schedule.on)}"></div>
+ <div><label>Mode</label><select id="scm"><option value="quiet" ${C.schedule.mode==="quiet"?"selected":""}>Quiet: stop SSC, disks to sleep, screen off</option><option value="suspend" ${C.schedule.mode==="suspend"?"selected":""}>Suspend the machine and wake it up</option><option value="poweroff" ${C.schedule.mode==="poweroff"?"selected":""}>Power off and switch it on again</option></select></div></div>
+ <div class="row">${["mon","tue","wed","thu","fri","sat","sun"].map(d=>`<label style="display:inline-flex;gap:5px;align-items:center;color:var(--text)">${chk("scd-"+d,C.schedule.days.includes(d))} ${d[0].toUpperCase()+d.slice(1)}</label>`).join(" ")}</div>
+ <div class="row"><label style="display:inline-flex;gap:8px;align-items:center;color:var(--text)">${chk("scdk",C.schedule.spin_down_disks)} Spin hard disks down (quiet mode)</label>
+ <label style="display:inline-flex;gap:8px;align-items:center;color:var(--text)">${chk("scsc",C.schedule.screen_off)} Turn the console screen off (quiet mode)</label>
+ <label style="display:inline-flex;gap:8px;align-items:center;color:var(--text)">${chk("scss",C.schedule.stop_ssh)} Also stop SSH (quiet mode)</label></div>
+ <div class="row"><button class="b p" onclick="saveSched()">Save and apply</button></div>
+ <p class="sub">In quiet mode this web page is unreachable during the sleep period (SSH stays on unless you stop it). Suspend and power-off need a hardware clock that can wake the machine (most PCs and laptops have one; some BIOS settings must allow "wake on RTC alarm"). To end a sleep period by hand: <code>ssconfig schedule up</code>.</p></div>`,
 WebUntis:()=>`<h1>WebUntis</h1><p class="sub">The server logs in to WebUntis by itself with the <b>Untis Mobile</b> key (no browser, no password).</p>
  <div class="card"><div class="kv"><span>Connected as</span><b>${esc(S.untis||"nobody yet")}</b></div><div class="kv"><span>Last update</span><b>${when(S.synced_at)}</b></div>
  <div class="row"><div style="flex:1"><label>Option 1 - the Untis Mobile link: WebUntis → Profile → Freigaben / Access → Untis Mobile → scan the QR code with a phone camera and paste the text (starts with untis://setschool?…)</label>
@@ -140,6 +150,8 @@ async function instUpd(){if(!confirm("Download and install the new version now? 
     if(!r.ok){el.textContent=j.error||"failed";return}el.textContent="Updating - this page reloads when the server is back…";
     const cur=j.from,t=setInterval(async()=>{try{const h=await (await fetch("/health")).json();if(h.version&&h.version!==cur){clearInterval(t);location.reload()}}catch(e){}},3000)}
   catch(e){el.textContent="failed"}}
+function saveSched(){const days=["mon","tue","wed","thu","fri","sat","sun"].filter(d=>$("#scd-"+d).checked);
+  cfg({schedule:{enabled:$("#sce").checked,off:$("#sco").value,on:$("#scn").value,mode:$("#scm").value,days,spin_down_disks:$("#scdk").checked,screen_off:$("#scsc").checked,stop_ssh:$("#scss").checked}},"Saved - applying…")}
 function savePower(){cfg({power:{lid:$("#pl").value,block_sleep:$("#pb").checked}},"Saved - applying…")}
 function saveAuto(){cfg({console:{autologin_user:$("#ale").checked?$("#alu").value.trim():""}},"Saved - applies at the next boot")}
 function saveWeb(){cfg({web:{port:+$("#wp").value,bind:$("#wb").value,session_hours:+$("#sh").value,https:$("#hs").checked},firewall:{enabled:$("#fw").checked}},"Saved - the service restarts")}

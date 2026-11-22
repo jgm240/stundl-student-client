@@ -1,8 +1,7 @@
 [Unit]
 Description=SSC Server live console
 ConditionPathExists=/run/live/medium
-After=systemd-user-sessions.service plymouth-quit-wait.service getty@tty1.service
-Conflicts=getty@tty1.service
+After=systemd-user-sessions.service plymouth-quit-wait.service
 Before=getty.target
 
 [Service]

@@ -148,10 +148,19 @@ def install(ans, run, root=TARGET, efi=None, a=None):
             ch("chown", "-R", "ssc:ssc", "/var/lib/ssc")      # the settings file was rewritten as root
         ch("systemctl", "enable", "ssc-server", "ssc-apply.path", "ssc-banner", "nftables", "ssh", "ssc-sync.timer", check=False)
 
+        # live-medium-only units must not exist on the installed system (they are skipped there, but the menu unit's old Conflicts=
+        # used to cancel the console login at every boot)
+        if not run.dry:
+            for name in ("ssc-live-console.service", "ssc-autoinstall.service"):
+                (root / "etc/systemd/system" / name).unlink(missing_ok=True)
+                (root / "etc/systemd/system/multi-user.target.wants" / name).unlink(missing_ok=True)
+            (root / "usr/local/sbin/ssc-live-menu").unlink(missing_ok=True)
         # the installed system must show a login prompt on the screen (tty1), not a blank cursor
         ch("systemctl", "enable", "getty@tty1.service", check=False)
         if not run.dry and not (root / "etc/systemd/system/getty.target.wants/getty@tty1.service").exists():
             raise RuntimeError("the console login (getty@tty1) is not enabled in the installed system")
+        if not run.dry and (root / "etc/systemd/system/ssc-live-console.service").exists():
+            raise RuntimeError("the live-only console unit is still on the installed system")
 
         step("Removing the live-system parts")
         ch("sh", "-c", "apt-get -y purge live-boot live-boot-initramfs-tools live-config live-config-systemd live-config-sysvinit 2>/dev/null || "

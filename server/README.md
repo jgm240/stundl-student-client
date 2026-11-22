@@ -30,6 +30,13 @@ By default closing the lid does **nothing** - the machine keeps running - and it
 * It's done with systemd-logind (`/etc/systemd/logind.conf.d/ssc-power.conf`) and by masking the sleep targets.
 * With the lid closed a laptop gets warm: keep the vents free and plug it in. Whether the screen turns off or the backlight goes dark is up to the laptop. Not tested on a real laptop lid (QEMU has none), only the generated settings are tested.
 
+## Sleep schedule (night mode)
+`ssconfig schedule set 22:00 06:00` (or the Power tab) switches the server off at night and back on in the morning, on the days you choose.
+* **Quiet** (default): stops the SSC services (web, Parent links, sync - and SSH if you ask), spins down the *rotating* hard disks (`hdparm -y`; SSDs have nothing to spin down) and blanks the console. The machine itself keeps running. In the morning everything starts again. The web page is unreachable during the night.
+* **Suspend** / **Power off**: the machine sleeps and wakes up by itself at the switch-on time through the hardware clock (RTC). Needs a PC or laptop that supports it (a BIOS "wake on RTC alarm" setting may need to be on); without an RTC only "quiet" is accepted.
+* `ssconfig schedule up` ends a sleep period by hand; a machine that is started inside the sleep period in quiet mode goes back to sleep. Times are the server's local time.
+* Not tested on real hardware: the planning, the generated systemd timers and the commands are unit-tested, but actual disk spin-down, screen blanking and RTC wake-up need a real machine.
+
 ## Updates
 The Overview tab of the admin panel (or `ssconfig update`, `ssconfig update --install`, `ssconfig update --rollback`) updates SSC Server from this project's GitHub releases. It only happens when you ask. The new code is unpacked into a staging folder (only the known SSC files, nothing else), every Python file is compile-checked, the new version must import and report the version of the release, and only then is it swapped in; the old version is kept in `/opt/ssc.prev` and the web service restarts. This updates SSC itself, not Debian (use `apt` for that). Honest limit: a source archive has no signature or checksum, so the update trusts GitHub's TLS and the project's repository.
 

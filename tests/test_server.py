@@ -370,6 +370,18 @@ class ServerTests(unittest.TestCase):
         finally:
             updater.releases = old
 
+    def test_schedule_from_the_web_panel(self):
+        a = Client(self.port)
+        a.login("boss", "twelve-chars!")
+        req = serverconf.state_dir() / "apply" / "request.json"
+        req.unlink(missing_ok=True)
+        s, b, _ = a.req("POST", "/api/admin/config", {"schedule": {"enabled": True, "off": "23:00", "on": "05:30", "days": ["mon", "tue"], "mode": "quiet"}})
+        self.assertEqual(s, 200)
+        self.assertIn("schedule", json.loads(req.read_text())["parts"])
+        self.assertEqual(json.loads(a.req("GET", "/api/admin/config")[1])["schedule"]["days"], ["mon", "tue"])
+        self.assertEqual(a.req("POST", "/api/admin/config", {"schedule": {"off": "nope"}})[0], 400)
+        a.req("POST", "/api/admin/config", {"schedule": {"enabled": False}})
+
     def test_watch_api_is_admin_only_and_validates(self):
         g = Client(self.port)
         g.login("anna", "longenoughpw")
@@ -1047,3 +1059,159 @@ class UntisInputTests(unittest.TestCase):
         r = subprocess.run([sys.executable, str(ROOT / "ssc.py"), "untis", "set", self.BASE + "ABCD0189"], capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL)
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("0 1 8 9", r.stderr)
+
+
+class ConsoleUnitTests(unittest.TestCase):
+    OV = ROOT / "server/iso/overlay/etc/systemd/system"
+
+    def test_live_menu_must_not_conflict_with_the_normal_login(self):
+        unit = (self.OV / "ssc-live-console.service").read_text()
+        self.assertNotIn("Conflicts=", unit)                    # a Conflicts= is applied before ConditionPathExists: it stopped tty1's login on installed systems
+        drop = (self.OV / "getty@tty1.service.d/10-ssc-live.conf").read_text()
+        self.assertIn("ConditionPathExists=!/run/live/medium", drop)
+
+    def test_installer_removes_the_live_only_units(self):
+        src = (ROOT / "server/ssc_install.py").read_text()
+        for needle in ("ssc-live-console.service", "ssc-autoinstall.service", "ssc-live-menu"):
+            self.assertIn(needle, src)
+
+    def test_who_parsing(self):
+        import serverapp
+        self.assertEqual(serverapp.parse_who("admin    tty1         2026-11-22 17:00\nmax      pts/0        2026-11-22 17:05 (192.168.1.5)\n"),
+                         [{"user": "admin", "tty": "tty1"}, {"user": "max", "tty": "pts/0"}])
+        self.assertEqual(serverapp.parse_who(""), [])
+        info = serverapp.console_info()
+        self.assertIn("getty", info)
+        self.assertIsInstance(info["logged_in"], list)
+
+
+class ScheduleTests(unittest.TestCase):
+    def setUp(self):
+        self.d = isolate()
+        import schedule
+        self.sch = schedule
+
+    def sc(self, **kw):
+        return serverconf.validate({"schedule": {"enabled": True, **kw}})["schedule"]
+
+    def test_validation(self):
+        s = self.sc(days="Sat, Mon,mon")
+        self.assertEqual((s["days"], s["off"], s["on"]), (["mon", "sat"], "22:00", "06:00"))
+        for bad in ({"off": "25:00"}, {"off": "9pm"}, {"on": "6:00"}, {"off": "08:00", "on": "08:00"}, {"days": []}, {"days": "funday"}, {"mode": "explode"}):
+            with self.assertRaises(ValueError, msg=str(bad)):
+                self.sc(**bad)
+        self.assertFalse(serverconf.validate({})["schedule"]["enabled"])                       # off by default
+
+    def test_in_window_overnight_and_same_day(self):
+        from datetime import datetime as dt
+        s = self.sc()                                                                          # 22:00 -> 06:00, every day
+        for t, want in (("2026-11-23 21:59", False), ("2026-11-23 22:00", True), ("2026-11-24 03:00", True), ("2026-11-24 05:59", True), ("2026-11-24 06:00", False), ("2026-11-24 12:00", False)):
+            self.assertEqual(self.sch.in_window(dt.fromisoformat(t), s), want, t)
+        day = self.sc(off="13:00", on="15:30")                                                  # same-day window
+        self.assertTrue(self.sch.in_window(dt(2026, 11, 23, 14, 0), day))
+        self.assertFalse(self.sch.in_window(dt(2026, 11, 23, 16, 0), day))
+        weekdays = self.sc(days="mon,tue,wed,thu,fri")                                          # the sleep that starts Friday night ends Saturday 06:00
+        self.assertTrue(self.sch.in_window(dt(2026, 11, 28, 2, 0), weekdays))                  # Saturday 02:00 (Fri night)
+        self.assertFalse(self.sch.in_window(dt(2026, 11, 28, 23, 0), weekdays))                # Saturday night: not scheduled
+        self.assertFalse(self.sch.in_window(dt(2026, 11, 29, 2, 0), weekdays))
+        self.assertFalse(self.sch.in_window(dt(2026, 11, 23, 23, 0), serverconf.validate({})["schedule"]))   # disabled
+
+    def test_next_wake(self):
+        from datetime import datetime as dt
+        s = self.sc()
+        self.assertEqual(self.sch.next_wake(dt(2026, 11, 23, 22, 5), s), dt(2026, 11, 24, 6, 0))
+        self.assertEqual(self.sch.next_wake(dt(2026, 11, 24, 2, 0), s), dt(2026, 11, 24, 6, 0))
+
+    def test_units(self):
+        u = self.sch.render_units(self.sc(days="mon,fri"))
+        self.assertIn("OnCalendar=Mon,Fri 22:00:00", u["ssc-sleep.timer"])
+        self.assertIn("OnCalendar=Tue,Sat 06:00:00", u["ssc-wake.timer"])                      # overnight: the wake-up is the next day
+        self.assertIn("ssconfig.py schedule down", u["ssc-sleep.service"])
+        self.assertIn("TimeoutStartSec=infinity", u["ssc-sleep.service"])
+        same = self.sch.render_units(self.sc(off="13:00", on="15:00", days="wed"))
+        self.assertIn("OnCalendar=Wed 15:00:00", same["ssc-wake.timer"])
+        sus = self.sch.render_units(self.sc(mode="suspend"))
+        self.assertNotIn("ssc-wake.timer", sus)                                                  # suspend/poweroff wake through the hardware clock
+
+    def test_disk_detection(self):
+        txt = "sda 1 disk\nsdb 0 disk\nnvme0n1 0 disk\nsr0 1 rom\nloop0 0 loop\nsdc 1 disk\nzram0 0 disk\n"
+        self.assertEqual(self.sch.parse_rotational_disks(txt), ["/dev/sda", "/dev/sdc"])          # only spinning disks
+
+    def test_plans(self):
+        from datetime import datetime as dt
+        now = dt(2026, 11, 23, 22, 0)
+        q = self.sch.plan_down(self.sc(), now, ["/dev/sda", "/dev/sdb"])
+        self.assertEqual(q[0], ["systemctl", "stop", "ssc-sync.timer"])
+        self.assertIn(["systemctl", "stop", "ssc-server.service"], q)
+        self.assertNotIn(["systemctl", "stop", "ssh.service"], q)                                 # SSH stays unless asked
+        self.assertIn(["hdparm", "-y", "/dev/sda"], q)
+        self.assertIn(["hdparm", "-y", "/dev/sdb"], q)
+        self.assertEqual(q[-1], ["screen", "off"])
+        self.assertLess(q.index(["sync"]), q.index(["hdparm", "-y", "/dev/sda"]))                 # flush first, then spin down
+        self.assertIn(["systemctl", "stop", "ssh.service"], self.sch.plan_down(self.sc(stop_ssh=True), now))
+        lean = self.sch.plan_down(self.sc(spin_down_disks=False, screen_off=False), now, ["/dev/sda"])
+        self.assertFalse(any(c[0] in ("hdparm", "screen") for c in lean))
+        sus = self.sch.plan_down(self.sc(mode="suspend"), now)
+        self.assertEqual(sus[-1][:3], ["rtcwake", "-m", "mem"])
+        self.assertEqual(int(sus[-1][-1]), int(dt(2026, 11, 24, 6, 0).timestamp()))               # woken at the switch-on time
+        self.assertEqual(self.sch.plan_down(self.sc(mode="poweroff"), now)[-1][:3], ["rtcwake", "-m", "off"])
+        self.assertFalse(any(c[0] == "systemctl" for c in sus))                                    # a suspended machine keeps its services
+        up = self.sch.plan_up(self.sc(stop_ssh=True))
+        self.assertIn(["systemctl", "start", "ssc-server.service"], up)
+        self.assertIn(["systemctl", "start", "ssh.service"], up)
+
+    def test_boot_check_only_puts_quiet_machines_back_to_sleep(self):
+        from datetime import datetime as dt
+        calls = []
+
+        class R:
+            returncode, stderr, stdout = 0, "", ""
+        run = lambda c: calls.append(c) or R()
+        cfg = lambda **kw: {"schedule": self.sc(**kw)}
+        self.sch.check_at_boot(cfg(spin_down_disks=False, screen_off=False), run, dt(2026, 11, 24, 3, 0))
+        self.assertIn(["systemctl", "stop", "ssc-server.service"], calls)
+        calls.clear()
+        self.sch.check_at_boot(cfg(), run, dt(2026, 11, 24, 12, 0))                                  # daytime: nothing
+        self.sch.check_at_boot(cfg(mode="suspend"), run, dt(2026, 11, 24, 3, 0))                     # woken on purpose: nothing
+        self.assertEqual(calls, [])
+
+    def test_apply_writes_units_and_refuses_rtc_modes_without_a_clock(self):
+        import applycfg
+        root = Path(self.d) / "root"
+        (root / "etc/systemd/system").mkdir(parents=True)
+        seen = []
+
+        class R:
+            returncode, stderr, stdout = 0, "", ""
+        run = lambda c: seen.append(c) or R()
+        cfg = lambda **kw: serverconf.validate({"schedule": {"enabled": True, **kw}})
+        res = applycfg.apply(["schedule"], cfg(), root, run)
+        self.assertTrue(res["ok"], res)
+        self.assertTrue((root / "etc/systemd/system/ssc-sleep.timer").exists() and (root / "etc/systemd/system/ssc-wake.timer").exists())
+        self.assertIn(["systemctl", "enable", "--now", "ssc-sleep.timer"], seen)
+        self.assertIn(["systemctl", "daemon-reload"], seen)
+        res = applycfg.apply(["schedule"], cfg(mode="suspend"), root, run)                          # no /sys/class/rtc here
+        self.assertFalse(res["ok"])
+        self.assertIn("hardware clock", res["failed"][0])
+        (root / "sys/class/rtc/rtc0").mkdir(parents=True)
+        self.assertTrue(applycfg.apply(["schedule"], cfg(mode="suspend"), root, run)["ok"])
+        self.assertFalse((root / "etc/systemd/system/ssc-wake.timer").exists())                      # not needed for suspend
+        seen.clear()
+        res = applycfg.apply(["schedule"], serverconf.validate({}), root, run)                      # off: units gone, services started again
+        self.assertTrue(res["ok"], res)
+        self.assertFalse((root / "etc/systemd/system/ssc-sleep.timer").exists())
+        self.assertIn(["systemctl", "disable", "--now", "ssc-sleep.timer"], seen)
+        self.assertIn(["systemctl", "start", "ssc-server.service"], seen)
+
+    def test_ssconfig_schedule(self):
+        import ssconfig
+        ssconfig.addresses = lambda: []
+        self.assertEqual(ssconfig.main(["schedule", "status"]), 0)
+        self.assertEqual(ssconfig.main(["schedule", "set", "23:30", "07:15"]), 0)
+        s = serverconf.load()["schedule"]
+        self.assertEqual((s["enabled"], s["off"], s["on"]), (True, "23:30", "07:15"))
+        self.assertEqual(ssconfig.main(["schedule", "set", "25:00", "07:00"]), 1)
+        self.assertEqual(ssconfig.main(["set", "schedule.mode", "suspend"]), 0)
+        self.assertEqual(serverconf.load()["schedule"]["mode"], "suspend")
+        self.assertEqual(ssconfig.main(["schedule", "disable"]), 0)
+        self.assertFalse(serverconf.load()["schedule"]["enabled"])

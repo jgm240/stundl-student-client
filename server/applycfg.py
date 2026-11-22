@@ -148,6 +148,28 @@ def apply_part(part, cfg, root=None, run=_run):
         run(["nft", "-f", str(root / "etc/nftables.conf")])
         run(["systemctl", "enable", "nftables"])
         return ["firewall " + ("on" if cfg["firewall"]["enabled"] else "off")]
+    if part == "schedule":
+        import schedule
+        sc = cfg["schedule"]
+        sysd = root / "etc/systemd/system"
+        if sc["enabled"] and sc["mode"] != "quiet" and not schedule.has_rtc(root):
+            raise RuntimeError("schedule: this machine has no hardware clock (RTC) to wake it up - use the 'quiet' mode")
+        units = schedule.render_units(sc) if sc["enabled"] else {}
+        for name in schedule.UNITS:
+            if name in units:
+                _write(root, f"etc/systemd/system/{name}", units[name])
+            else:
+                (sysd / name).unlink(missing_ok=True)
+        run(["systemctl", "daemon-reload"])
+        for timer in ("ssc-sleep.timer", "ssc-wake.timer"):
+            if timer in units:
+                run(["systemctl", "enable", "--now", timer])
+            else:
+                run(["systemctl", "disable", "--now", timer])
+        if not sc["enabled"]:
+            schedule.run_up(dict(cfg, schedule=dict(sc, screen_off=True)), run)         # switching the schedule off must never leave the server asleep
+            return ["sleep schedule off"]
+        return [f"sleep schedule on: {sc['mode']}, off {sc['off']}, on {sc['on']}"]
     if part == "update":
         import updater
         try:
@@ -181,7 +203,7 @@ def apply_part(part, cfg, root=None, run=_run):
     raise RuntimeError("unknown part " + part)
 
 
-ORDER = ("network", "firewall", "ssh", "console", "power", "web", "links", "update")
+ORDER = ("network", "firewall", "ssh", "console", "power", "schedule", "web", "links", "update")
 
 
 def apply(parts, cfg=None, root=None, run=_run):

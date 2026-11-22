@@ -20,6 +20,9 @@ except Exception:  # pragma: no cover
 
 ROLES = ("guest", "user", "admin")
 LID_ACTIONS = ("ignore", "suspend", "poweroff")
+DAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
+SCHEDULE_MODES = ("quiet", "suspend", "poweroff")
+TIME_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 SLEEP_TARGETS = ("sleep.target", "suspend.target", "hibernate.target", "hybrid-sleep.target")
 
 DEFAULTS = {
@@ -28,6 +31,7 @@ DEFAULTS = {
     "network": {"mode": "dhcp", "interface": "auto", "address": "", "gateway": "", "dns": [], "hostname": "ssc-server"},
     "console": {"autologin_user": ""},
     "power": {"lid": "ignore", "block_sleep": True},
+    "schedule": {"enabled": False, "off": "22:00", "on": "06:00", "days": list(DAYS), "mode": "quiet", "spin_down_disks": True, "screen_off": True, "stop_ssh": False},
     "wifi": {"enabled": False, "ssid": "", "open": False, "hidden": False, "country": ""},
     "ssh": {"enabled": True, "port": 22, "permit_root": False, "password_auth": True, "allow_users": []},
     "sections": {"guest": ["today", "timetable", "homework", "exams", "plan", "changes"],
@@ -145,6 +149,23 @@ def validate(cfg):
     if pw["lid"] not in LID_ACTIONS:
         raise ValueError("lid action must be one of: " + ", ".join(LID_ACTIONS))
     pw["block_sleep"] = _bool(pw["block_sleep"])
+
+    sc = c["schedule"]
+    for k in ("enabled", "spin_down_disks", "screen_off", "stop_ssh"):
+        sc[k] = _bool(sc[k])
+    for k in ("off", "on"):
+        sc[k] = str(sc[k]).strip()
+        if not TIME_RE.match(sc[k]):
+            raise ValueError("schedule times look like 22:00 (24-hour clock)")
+    if sc["off"] == sc["on"]:
+        raise ValueError("the switch-off and switch-on times must differ")
+    days = sc["days"] if isinstance(sc["days"], list) else [x for x in re.split(r"[,\s]+", str(sc["days"]).lower()) if x]
+    days = [str(d).strip().lower()[:3] for d in days]
+    if not days or any(d not in DAYS for d in days):
+        raise ValueError("schedule days: choose from " + ", ".join(DAYS))
+    sc["days"] = [d for d in DAYS if d in days]
+    if sc["mode"] not in SCHEDULE_MODES:
+        raise ValueError("schedule mode must be one of: " + ", ".join(SCHEDULE_MODES))
 
     al = str(c["console"]["autologin_user"]).strip()
     if al and (not USER_RE.match(al) or al == "root"):

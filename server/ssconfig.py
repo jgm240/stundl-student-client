@@ -9,6 +9,7 @@
   ssconfig set <setting> <val>  change one setting     e.g.  ssconfig set links.long true
                                                              ssconfig set network.mode static
   ssconfig ip <addr/len> <gateway> [dns,dns]   fixed IP address       ssconfig dhcp   automatic address
+  ssconfig schedule set 22:00 06:00|disable|status   switch off at night, disks to sleep, back on in the morning
   ssconfig update [--install|--rollback]   check for / install a newer SSC from GitHub
   ssconfig lid ignore|suspend|poweroff|status   what closing a laptop lid does (ignore = keep running)
   ssconfig sleep block|allow    never (or sometimes) suspend
@@ -85,7 +86,7 @@ def apply_parts(parts):
 
 
 def changed(old, new):
-    parts = [k for k in ("network", "ssh", "firewall", "web", "links", "console", "power") if old[k] != new[k]]
+    parts = [k for k in ("network", "ssh", "firewall", "web", "links", "console", "power", "schedule") if old[k] != new[k]]
     if old["wifi"] != new["wifi"] and "network" not in parts:
         parts.append("network")
     return parts + (["firewall"] if (old["web"]["port"], old["links"]) != (new["web"]["port"], new["links"]) else [])
@@ -216,6 +217,49 @@ def wifi_set(ssid, passphrase=None, open_net=False, hidden=False, country=None):
     fix_owner()
     apply_parts(sorted(set(changed(old, new) + ["network"])))
     return new
+
+
+def cmd_schedule(args):
+    """ssconfig schedule status
+       ssconfig schedule set 22:00 06:00      switch off at 22:00, back on at 06:00 (and turn the schedule on)
+       ssconfig schedule enable|disable       turn it on / off without changing the times
+       ssconfig schedule down|up              do it right now (down = start the sleep period, up = end it)
+       ssconfig schedule check                (used at boot) go back to sleep if the machine was started inside the period
+     More: ssconfig set schedule.mode quiet|suspend|poweroff   schedule.days mon,tue,...   schedule.spin_down_disks true|false
+                        schedule.screen_off true|false   schedule.stop_ssh true|false"""
+    import schedule
+    sub = args[0] if args else "status"
+    cfg = serverconf.load()
+    try:
+        if sub == "status":
+            print(schedule.describe(cfg))
+            print("Hardware clock (RTC) for waking up:", "found" if schedule.has_rtc() else "not found - only 'quiet' mode works")
+            return 0
+        if sub == "set" and len(args) >= 3:
+            c = serverconf.load()
+            c["schedule"].update(off=args[1], on=args[2], enabled=True)
+            old = serverconf.load()
+            new = serverconf.save(c)
+            fix_owner()
+            apply_parts(sorted(set(changed(old, new) + ["schedule"])))
+            print(schedule.describe(new))
+            return 0
+        if sub in ("enable", "disable"):
+            set_setting("schedule.enabled", "true" if sub == "enable" else "false")
+            return 0
+        if sub in ("down", "up", "check"):
+            if os.geteuid() != 0:
+                print("this needs root (ssconfig runs it with sudo)")
+                return 1
+            notes = {"down": schedule.run_down, "up": schedule.run_up}[sub](cfg) if sub != "check" else schedule.check_at_boot(cfg)
+            for n in notes or []:
+                print(n)
+            return 0
+    except ValueError as e:
+        print("Error:", e)
+        return 1
+    print(cmd_schedule.__doc__)
+    return 2
 
 
 def cmd_update(args):
@@ -479,8 +523,8 @@ def menu():
         print(__doc__)
         return 0
     while True:
-        rc, ch = wt("--title", "SSC Server", "--menu", "Configure this server", "23", "70", "14",
-                    "ip", "Show IP address and web address", "link", "Show the Parent link", "net", "Network (DHCP / fixed IP)", "wifi", "Wi-Fi", "auto", "Console auto-login", "lid", "Laptop lid / sleep",
+        rc, ch = wt("--title", "SSC Server", "--menu", "Configure this server", "24", "70", "15",
+                    "ip", "Show IP address and web address", "link", "Show the Parent link", "net", "Network (DHCP / fixed IP)", "wifi", "Wi-Fi", "auto", "Console auto-login", "lid", "Laptop lid / sleep", "sched", "Sleep schedule",
                     "web", "Web port, HTTPS, long links", "acc", "Accounts", "ssh", "SSH settings", "untis", "WebUntis key",
                     "sync", "Fetch data now", "rot", "New Parent link", "status", "Status", "quit", "Leave")
         if rc != 0 or ch == "quit":
@@ -502,6 +546,17 @@ def menu():
                            "suspend", "suspends" + ("  <- now" if cur == "suspend" else ""), "poweroff", "powers off" + ("  <- now" if cur == "poweroff" else ""))
                 if rc == 0:
                     cmd_lid([v])
+            elif ch == "sched":
+                import schedule
+                sc = serverconf.load()["schedule"]
+                rc, v = wt("--inputbox", "Switch off at (24-hour, e.g. 22:00) - leave empty to turn the schedule off", "9", "70", sc["off"] if sc["enabled"] else "")
+                if rc == 0 and not v.strip():
+                    cmd_schedule(["disable"])
+                elif rc == 0:
+                    rc2, w = wt("--inputbox", "Switch back on at (e.g. 06:00)", "8", "60", sc["on"])
+                    if rc2 == 0:
+                        cmd_schedule(["set", v.strip(), w.strip()])
+                        show("Sleep schedule", capture(cmd_schedule, ["status"]))
             elif ch == "auto":
                 cur = serverconf.load()["console"]["autologin_user"]
                 if wt("--defaultno", "--yesno", ("Auto-login is ON (" + cur + "). Turn it off?") if cur else
@@ -673,6 +728,8 @@ def main(argv=None):
             return cmd_lid(rest)
         if c == "update":
             return cmd_update(rest)
+        if c == "schedule":
+            return cmd_schedule(rest)
         if c == "sleep":
             return cmd_sleep(rest)
         if c == "dhcp":

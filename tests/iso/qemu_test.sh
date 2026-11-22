@@ -41,7 +41,7 @@ fi
 # ---- install mode
 qemu-img create -f qcow2 $W/disk.qcow2 8G >/dev/null
 mkdir $W/ans; cat > $W/ans/answers.json <<J
-{"disk":"auto","hostname":"ssc-ci","admin":"admin","password":"$PW","timezone":"UTC","keymap":"us","ssh":true,"network":{"mode":"dhcp"}}
+{"disk":"auto","hostname":"ssc-ci","admin":"admin","password":"$PW","timezone":"UTC","keymap":"us","ssh":true,"autologin":${AUTOLOGIN:-false},"network":{"mode":"dhcp"}}
 J
 truncate -s 16M $W/ans.img; mkfs.ext4 -q -F -L SSCANS -d $W/ans $W/ans.img
 BIOSARG=""; [ "${UEFI:-0}" = 1 ] && BIOSARG="-bios /usr/share/ovmf/OVMF.fd"
@@ -66,6 +66,18 @@ curl -fsS -b $W/jar -o $W/admin.html http://127.0.0.1:18080/admin; grep -qi "adm
 test "$(curl -s -o /dev/null -w '%{http_code}' -H 'Content-Type: application/json' -d '{"name":"admin","password":"nope-nope-nope"}' http://127.0.0.1:18080/api/login)" = 401
 test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18080/data.json)" = 401
 echo "WEB + AUTH OK"
+# the console: a login must exist on tty1 (getty), and with auto-login the admin must really be logged in there
+curl -fsS -b $W/jar -o $W/status.json http://127.0.0.1:18080/api/admin/status
+python3 - "$W/status.json" "${AUTOLOGIN:-false}" <<'PY'
+import json, sys
+c = json.load(open(sys.argv[1]))["console"]
+print("console:", c)
+if sys.argv[2] == "true":
+    ok = any(x["user"] == "admin" and x["tty"] == "tty1" for x in c["logged_in"])
+    sys.exit(0 if ok else 1)
+sys.exit(0 if c["getty"] == "active" else 1)
+PY
+echo "CONSOLE LOGIN OK"
 if grep -qi "unpacking failed\|Kernel panic" $W/boot.log; then echo "INSTALLED BOOT HAD INITRAMFS/PANIC ERRORS"; exit 1; fi
 # the SCREEN (tty1) must show a login prompt, not a blank cursor: screenshot via the QEMU monitor, count lit pixels
 sleep 20
