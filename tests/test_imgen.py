@@ -9,6 +9,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
+try:
+    import PIL  # noqa: F401
+except ImportError:                      # the card tool needs Pillow; without it these tests are skipped, not failed
+    raise unittest.SkipTest("Pillow is not installed")
 import ssc_imgen as im  # noqa: E402
 
 
