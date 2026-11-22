@@ -148,6 +148,13 @@ def apply_part(part, cfg, root=None, run=_run):
         run(["nft", "-f", str(root / "etc/nftables.conf")])
         run(["systemctl", "enable", "nftables"])
         return ["firewall " + ("on" if cfg["firewall"]["enabled"] else "off")]
+    if part == "update":
+        import updater
+        try:
+            v = updater.install_server(root=str(serverconf.system_root() / "opt/ssc"), run=run, log=lambda m: None)
+        except updater.UpdateError as e:
+            raise RuntimeError("update: " + str(e))
+        return [f"updated to {v} (the previous version is kept for a roll-back)"]
     if part == "power":
         pw = cfg["power"]
         _write(root, "etc/systemd/logind.conf.d/ssc-power.conf", serverconf.render_logind(pw))
@@ -174,7 +181,7 @@ def apply_part(part, cfg, root=None, run=_run):
     raise RuntimeError("unknown part " + part)
 
 
-ORDER = ("network", "firewall", "ssh", "console", "power", "web", "links")
+ORDER = ("network", "firewall", "ssh", "console", "power", "web", "links", "update")
 
 
 def apply(parts, cfg=None, root=None, run=_run):

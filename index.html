@@ -234,19 +234,19 @@ const empty=()=>`<p class="mut">No data yet. Press “Sync now”.</p>`;
 const hue=t=>{let h=0;for(const c of String(t||"?"))h=(h*31+c.charCodeAt(0))%360;return h};
 const lkey=e=>esc(e.date+"|"+e.start+"|"+e.subject);
 const chip=e=>(e.changes&&e.changes.length)?`<span class="chip">changed</span>`:"";
-const ent=e=>`<div class="ent ${e.cancelled?"x":""}" style="--h:${hue(e.subject)}" onclick="lesson('${lkey(e)}')" role="button" tabindex="0"><b>${esc(e.subject||"Lesson")}</b>${chip(e)} <span class="mut">${esc(e.room)}</span><small>${e.start.slice(11,16)}–${e.end.slice(11,16)} · ${esc(e.teacher)}${e.cancelled?" · "+SSCUI.t("CANCELLED"):""}</small>${e.topic?`<span class="topic">${esc(e.topic)}</span>`:(e.info?`<small>${esc(e.info)}</small>`:"")}</div>`;
+const ent=e=>`<div class="ent ${e.cancelled?"x":""}" style="--h:${hue(e.subject)}" onclick="lesson('${lkey(e)}')" role="button" tabindex="0"><b>${esc(e.subject||"Lesson")}</b>${chip(e)} <span class="mut">${esc(e.room)}</span><small>${e.start.slice(11,16)}–${e.end.slice(11,16)} · ${esc(e.teacher)}${e.cancelled?" · "+SSCUI.t("CANCELLED"):""}</small>${e.topic?`<span class="topic" translate="no">${esc(e.topic)}</span>`:(e.info?`<small>${esc(e.info)}</small>`:"")}</div>`;
 const allEntries=()=>Object.values(S.timetable||{}).flat();
 const pad2=n=>String(n).padStart(2,"0"),hmOf=e=>e.start.slice(11,16)+"–"+e.end.slice(11,16);
 function nowNext(){const n=new Date(),now=iso(n)+"T"+pad2(n.getHours())+":"+pad2(n.getMinutes()),es=allEntries().filter(e=>!e.cancelled).sort((a,b)=>a.start<b.start?-1:1);
   return{now,cur:es.find(e=>e.start<=now&&now<e.end),nxt:es.find(e=>e.start>now)}}
 function lessonRows(d,now){const l=allEntries().filter(e=>e.date===d).sort((a,b)=>a.start<b.start?-1:1);
-  return l.map(e=>`<div class="lrow ${e.cancelled?"x":""} ${now&&!e.cancelled&&e.start<=now&&now<e.end?"now":""}" style="--h:${hue(e.subject)}" onclick="lesson('${lkey(e)}')" role="button" tabindex="0"><span class="dot"></span><span class="t">${hmOf(e)}</span><div style="min-width:0"><b>${esc(e.subject_long||e.subject||"Lesson")}</b>${e.cancelled?` <small style="display:inline;color:var(--bad)">cancelled</small>`:""}${chip(e)}${e.topic?`<span class="topic">${esc(e.topic)}</span>`:""}</div><span class="r">${esc(e.room)} ${esc(e.teacher)}${!e.topic&&e.info?"<br>"+esc(e.info):""}</span></div>`).join("")||`<p class="mut">No lessons.</p>`}
+  return l.map(e=>`<div class="lrow ${e.cancelled?"x":""} ${now&&!e.cancelled&&e.start<=now&&now<e.end?"now":""}" style="--h:${hue(e.subject)}" onclick="lesson('${lkey(e)}')" role="button" tabindex="0"><span class="dot"></span><span class="t">${hmOf(e)}</span><div style="min-width:0"><b>${esc(e.subject_long||e.subject||"Lesson")}</b>${e.cancelled?` <small style="display:inline;color:var(--bad)">cancelled</small>`:""}${chip(e)}${e.topic?`<span class="topic" translate="no">${esc(e.topic)}</span>`:""}</div><span class="r">${esc(e.room)} ${esc(e.teacher)}${!e.topic&&e.info?"<br>"+esc(e.info):""}</span></div>`).join("")||`<p class="mut">No lessons.</p>`}
 function lessonBody(e){
   const t=iso(new Date()),subj=e.subject,d=new Date(e.start),mins=Math.round((new Date(e.end)-d)/60000);
   const changed=(e.changes&&e.changes.length)||/CHANGED|SUBST/i.test(e.status||"");
   const badge=e.cancelled?`<span class="badge" style="background:var(--bad)">Cancelled</span>`:changed?`<span class="badge" style="background:var(--warn)">Changed</span>`:`<span class="badge" style="background:var(--ok)">Regular</span>`;
   const kv=(k,v)=>v?`<div class="kv"><span>${k}</span><b>${esc(v)}</b></div>`:"";
-  const box=(k,v)=>v?`<div class="d-box"><small>${k}</small>${esc(v)}</div>`:"";
+  const box=(k,v)=>v?`<div class="d-box"><small>${k}</small><span translate="no">${esc(v)}</span></div>`:"";
   const same=allEntries().filter(x=>x.subject===subj&&x.start>e.start&&!x.cancelled).sort((a,b)=>a.start<b.start?-1:1).slice(0,3);
   const hw=S.homework.filter(h=>!h.dismissed&&h.status!=="done"&&h.subject===subj),ex=(S.exams||[]).filter(x=>x.subject===subj&&x.date>=t),pl=(S.plan||[]).filter(p=>p.subject===subj&&p.date>=t&&!p.done);
   const content=[box("Lesson topic",e.topic),box("Notes",e.note),box("Substitution",e.substitution),(e.info&&e.info!==e.substitution&&e.info!==e.note&&e.info!==e.topic)?box("Info",e.info):""].join("");
@@ -302,7 +302,7 @@ const hwChips=()=>{const m=S.homework_summary||{};return ["missed","soon","pendi
 function subjChip(s){return s?`<span class="subj" style="--h:${hue(s)}">${esc(s)}</span>`:`<span class="subj none">No subject</span>`}
 function hwItem(h){return `<div class="item hw ${h.status==="done"?"done":""}" style="border-left:4px solid ${HWC[h.status]}"><input type="checkbox" ${h.done?"checked":""} ${SNAP?"disabled":""} onchange="toggle('${esc(h.id)}',this.checked)" title="Mark done on this Mac">
   <div class="b"><div class="hw-top">${subjChip(h.subject)}<span class="badge" style="background:${HWC[h.status]}">${HWL[h.status]}</span><small class="due" style="${h.status==="missed"?"color:var(--bad)":""}">${esc(dueText(h))}</small></div>
-  <div class="hw-text">${esc(h.text)}</div>${h.remark?`<small>${esc(h.remark)}</small>`:""}${h.dismissed?`<small>dismissed ${h.dismiss_reason==="manual"?"by you":"automatically ("+(h.dismiss_reason==="done"?"done":"missed too long")+")"}</small>`:""}</div>
+  <div class="hw-text" translate="no">${esc(h.text)}</div>${h.remark?`<small>${esc(h.remark)}</small>`:""}${h.dismissed?`<small>dismissed ${h.dismiss_reason==="manual"?"by you":"automatically ("+(h.dismiss_reason==="done"?"done":"missed too long")+")"}</small>`:""}</div>
   ${SNAP?"":`<button onclick="planFromHw('${esc(h.id)}')" title="Add to study plan">+ Plan</button>${h.dismissed?`<button onclick="hwDismiss('${esc(h.id)}',true)">Restore</button>`:`<button onclick="hwDismiss('${esc(h.id)}')" title="Hide this homework">Dismiss</button>`}`}</div>`}
 async function hwDismiss(id,restore){await post("/api/homework/"+(restore?"restore":"dismiss"),{id});await load()}
 function hw(){
@@ -342,7 +342,7 @@ function relDay(d){const t=iso(new Date()),n=Math.round((new Date(d+"T12:00")-ne
 function examItem(x){const t=iso(new Date()),dt=x.date?new Date(x.date+"T12:00"):null,past=!!x.date&&x.date<t,L=SSCUI.locale();
   const tm=x.start?` <span>· ${esc(x.start)}${x.end?"–"+esc(x.end):""}</span>`:"";
   return `<div class="item exam ${past?"done":""}"><div class="datebox ${x.date===t?"today":""}">${dt?`<small>${esc(dt.toLocaleDateString(L,{weekday:"short"}))}</small><b>${dt.getDate()}</b><span>${esc(dt.toLocaleDateString(L,{month:"short"}))}</span>`:`<b>?</b>`}</div>
-   <div class="b"><div class="hw-top">${subjChip(x.subject)}<small class="due">${x.date?`<span>${relDay(x.date)}</span>${tm}`:`<span>Date unknown</span>`}</small></div>${x.text?`<div class="hw-text">${esc(x.text)}</div>`:""}</div></div>`}
+   <div class="b"><div class="hw-top">${subjChip(x.subject)}<small class="due">${x.date?`<span>${relDay(x.date)}</span>${tm}`:`<span>Date unknown</span>`}</small></div>${x.text?`<div class="hw-text" translate="no">${esc(x.text)}</div>`:""}</div></div>`}
 function ex(){
   const t=iso(new Date()),all=S.exams||[];if(!all.length)return `<p class="mut">No exams.</p>`;
   const up=all.filter(x=>!x.date||x.date>=t).sort((a,b)=>!a.date?1:!b.date?-1:a.date<b.date?-1:a.date>b.date?1:0),past=all.filter(x=>x.date&&x.date<t).sort((a,b)=>a.date<b.date?1:-1);
@@ -431,7 +431,7 @@ function render(){
   $("#main").innerHTML=({today,tt,hw,ex,gr,ch,ms,se,pl,pe,set:sett})[tab]();
   if(tab==="se"&&f)$("#q").focus();
   const cv=$("#conv");if(cv)cv.scrollTop=cv.scrollHeight;
-  if(tab==="set"){SSCUI.mount($("#ui-prefs"))}
+  if(tab==="set"){SSCUI.mount($("#ui-prefs"));renderUpdates()}
   if(tab==="set"&&!SNAP){loadParent();loadWatch()}
 }
 SSCUI.onChange(()=>{if(S&&S.homework&&!document.body.classList.contains("setup")){const f=tab==="set";render();if(f)window.scrollTo(0,window.scrollY)}});
@@ -441,7 +441,20 @@ const brSelect=(id,cur)=>`<select id="${id}">${BR.map(b=>`<option value="${b.id}
 function aboutCard(){return `<h2>About</h2><div class="item"><div class="b"><p><b>Stundl Student Client</b> (SSC) - English: <b>SSC Student Client</b></p>
   <p class="mut">An unofficial, independent tool. It is not affiliated with or endorsed by Untis GmbH (WebUntis) or Microsoft. It only reads your own account with your own sign-in.</p></div></div>`}
 function appearanceCard(){return `<h2>Appearance</h2><div class="item"><div class="b" id="ui-prefs"></div></div>`}
-function sett(){return sett0()+appearanceCard()+hwSettings()+aboutCard()}
+let UM=null,UST="",updating=false;
+const updatesCard=()=>SNAP?"":`<h2>Updates</h2><div class="item"><div class="b" id="uc"></div></div>`;
+function renderUpdates(){const el=$("#uc");if(!el)return;const v=(UM&&UM.current)||CFG.version||"";
+  const can=UM&&!UM.error&&UM.update_available&&(UM.flavor==="server"||UM.asset);
+  el.innerHTML=`${v?`<p style="margin-top:0"><b>Version ${esc(v)}</b></p>`:""}`+
+   (UM&&UM.error?`<p class="mut">${esc(UM.error)}</p>`:UM&&UM.update_available?`<p>Version ${esc(UM.latest)} is available. ${UM.url?`<a href="${esc(UM.url)}" target="_blank" rel="noopener">Release notes</a>`:""}</p>`:UM?`<p class="mut">You're up to date.</p>`:"")+
+   `<div class="bar" style="margin:0"><button ${UST?"disabled":""} onclick="updCheck()">${UST==="Checking…"?"Checking…":"Check for updates"}</button>${can?`<button class="on" ${UST?"disabled":""} onclick="updAct()">${UM.flavor==="server"?"Install update":"Download update"}</button>`:""}</div>
+   ${UST&&UST!=="Checking…"?`<p class="mut">${esc(UST)}</p>`:""}`}
+async function updCheck(){UST="Checking…";renderUpdates();try{const r=await fetch("/api/update/check");UM=await r.json();if(!r.ok&&!UM.error)UM={error:"Could not check for updates"}}catch(e){UM={error:"Could not check for updates"}}UST="";renderUpdates()}
+async function updAct(){if(!UM)return;
+  if(UM.flavor==="server"){UST="The server is updating and restarts in a moment…";renderUpdates();const r=await post("/api/update/install");if(!r.ok){UST=(await r.json()).error||"failed";return renderUpdates()}
+    const cur=UM.current,t=setInterval(async()=>{try{const h=await (await fetch("/health")).json();if(h.version&&h.version!==cur){clearInterval(t);location.reload()}}catch(e){}},3000);return}
+  UST="Downloading…";renderUpdates();const r=await post("/api/update/download"),j=await r.json().catch(()=>({}));UST=r.ok?"Saved to "+j.path+". Quit SSC and unpack it over the old one.":(j.error||"failed");renderUpdates()}
+function sett(){return sett0()+appearanceCard()+updatesCard()+hwSettings()+aboutCard()}
 function sett0(){return `<h2>School &amp; login</h2><div class="item"><div class="b"><p>School: <b>${esc(CFG.school||"-")}</b> (${esc(CFG.server||"")})</p>
   <div class="bar">Browser for login: ${brSelect("brs",CFG.browser)}<button onclick="post('/api/browser',{browser:$('#brs').value}).then(()=>alert('Saved. Takes effect at the next login.'))">Save</button></div>
   <button onclick="setupView()">Choose another school / log in again</button></div></div><div id="wc"></div><div id="pc"></div>`}

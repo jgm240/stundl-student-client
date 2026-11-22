@@ -57,8 +57,23 @@ class RuntimeTests(unittest.TestCase):
         r = json.loads(out)
         self.assertEqual((r["a"], r["b"], r["c"], r["d"], r["e"]), ("Hausaufgaben", "  Heute ", "fällig in 3 Tagen (11-24)", "2 Tage überfällig (11-20)", "1 Tag überfällig (11-20)"))
         self.assertEqual(r["f"], "Homework due Friday: p.12")                  # user text is never touched
-        self.assertEqual((r["g"], r["h"], r["i"], r["j"]), ("in 5 Tagen", "3 verpasst · 2 bald fällig", "Woche ab 2026-11-23", "fällig 2026-11-30"))
+        self.assertEqual((r["g"], r["h"], r["i"], r["j"]), ("in 5 Tagen", "3 verpasst · 2 bald fällig", "Woche ab 2026-11-23", "due 2026-11-30"))
         self.assertEqual((r["k"], r["l"], r["m"]), ("Examens", "Zaloguj", "Homework"))
+
+    def test_sentences_and_user_text_are_not_mistaken_for_patterns(self):
+        out = node('''const u=require("./ui.js");u.set({lang:"de"},{silent:true});const r=[];
+          ["Dismiss homework automatically once it is done","due to the exam, bring a pen","due 2026-11-30","2 done","3 missed · 2 due soon","Learn 3 days of vocabulary",
+           "Week of 2026-11-23","in 5 days","Show earlier (7)","Show earlier (many)"].forEach(x=>r.push(u.tr(x)));console.log(JSON.stringify(r))''')
+        r = json.loads(out)
+        self.assertEqual(r[0], "Dismiss homework automatically once it is done")        # a sentence ending in "done" is not "{n} done"
+        self.assertEqual((r[1], r[2]), ("due to the exam, bring a pen", "due 2026-11-30"))
+        self.assertEqual((r[3], r[4], r[5]), ("2 erledigt", "3 verpasst · 2 bald fällig", "Learn 3 days of vocabulary"))
+        self.assertEqual((r[6], r[7], r[8], r[9]), ("Woche ab 2026-11-23", "in 5 Tagen", "Frühere anzeigen (7)", "Show earlier (many)"))   # counts are digits only
+
+    def test_user_written_text_is_marked_untranslatable(self):
+        s = (ROOT / "index.html").read_text(encoding="utf-8")
+        for needle in ('class="hw-text" translate="no"', 'class="topic" translate="no"'):
+            self.assertIn(needle, s)
 
     def test_invalid_preferences_are_dropped(self):
         out = node('const u=require("./ui.js");u.set({lang:"xx",theme:"sideways",accent:"nope",palette:"nope"},{silent:true});console.log(JSON.stringify(u.prefs()))')

@@ -42,6 +42,12 @@ A Debian-based, installable server image (64-bit and 32-bit) with guest/user/adm
 ## Access cards (`ssc-imgen`)
 `./ssc-imgen --user anna` (or `ssc imgen ...`, or `ssc-imgen` on the server ISO) makes a printable card like the Wi-Fi card in a hotel room: the SSC logo, `ip:port` (detected automatically on a server), user name, password, optional `--notes` and a QR code that opens the address. `.png`, `.jpg` and `.pdf`, light or `--dark`; `--lang de|fr|es|...` for 12 languages; `--demo` covers every value (and the QR code) with `[REDACTED]` banners for screenshots and demos - nothing of the real values is drawn, and the banners have a fixed size, so not even the password length leaks; `--network "Home WiFi"` shows the Wi-Fi network to join in the card header; `--cellularwarn` adds an amber "Connect to WiFi instead of mobile data to access SSC" notice (the address only works on your home network). The password is asked for without echo (or `--password-stdin`); it is only drawn on the picture, never stored, and the file is private to you (mode 600). Needs Pillow; the QR code needs segno.
 
+## Languages, themes and colors
+Every user picks their own **language** (English, Deutsch, Français, Español, Italiano, Português, Nederlands, Polski), **mode** (system / light / dark), **theme** (Default, Paper, Ocean, Forest, Midnight, Rose, Graphite) and **accent color** (8) with the palette button in the top bar (or Settings -> Appearance). On SSC Server the choice is saved per account; in the desktop app it is saved in your settings; the Parent page remembers it in the browser. The translations are mine and have not been checked by native speakers; the admin panel and the long help texts in Settings are English only.
+
+## Updates
+Settings -> Updates (or `ssc update`) checks this project's GitHub releases - only when you ask. The desktop app downloads the file for your system and keeps it only if its SHA-256 matches the release's `SHA256SUMS`; you then replace the app. An SSC Server installs the new code itself (`ssconfig update --install`, or the Overview tab of the admin panel): staged, compile- and import-checked, with the old version kept for `ssconfig update --rollback`.
+
 ## Security
 No password is ever stored. The WebUntis session and the Parent link secret are kept in the macOS Keychain, not in
 files; the data folder is private to your account; the local app server only answers the window the app opened; browser

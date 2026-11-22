@@ -51,6 +51,9 @@ Overview:()=>`<h1>Overview</h1><p class="sub">Everything about this server at a 
  <div class="kv"><span>Last data update</span><b>${when(S.synced_at)}</b></div>
  <div class="kv"><span>Accounts</span><b>${S.accounts.length} (${S.accounts.filter(a=>a.role==="admin").length} admin)</b></div></div>
  <div class="row"><button class="b p" onclick="run(()=>api('/api/admin/sync',{}),'Sync started')">Sync now</button></div>${apply()}
+ <h2>Updates</h2><div class="card"><div class="kv"><span>Installed version</span><b>${esc(S.version)}</b></div><div id="upd" class="sub"></div>
+ <div class="row"><button class="b" onclick="chkUpd()">Check for updates</button></div>
+ <p class="sub">SSC Server updates itself from this project's GitHub releases when you press the button - never on its own. The previous version is kept: <code>ssconfig update --rollback</code>.</p></div>
  <h2>Wall-display links</h2><div class="card">${S.links.enabled?(S.links.urls.map(u=>`<div class="kv"><span>${esc(u.host)}</span><div><code>${esc(u.browser)}</code><br><code>${esc(u.wall)}</code></div></div>`).join("")||"<span class='sub'>No network address yet.</span>")
  +`<div class="row"><button class="b" onclick="if(confirm('Create a new link? Displays using the old one stop working.'))run(()=>api('/api/admin/links/rotate',{}),'New link created')">New link</button>
  <span class="sub">${S.links.long?"Long links required (64 characters).":"Standard links (32 characters)."}</span></div>`:"<span class='sub'>Link access is turned off (Web & links).</span>"}</div>`,
@@ -126,6 +129,17 @@ async function saveUntis(){const qr=$("#qr").value.trim();
   const body=qr?{qr,test:true}:{server:$("#us").value,school:$("#uc").value,user:$("#uu").value,key:$("#uk").value,test:true};
   say("Saving and testing the login…");
   try{const r=await api("/api/admin/untis",body);say(r.message||"Saved",r.tested!==false);$("#qr").value="";$("#uk").value="";setTimeout(()=>show("WebUntis"),2500)}catch(e){say(e.message,false)}}
+async function chkUpd(){const el=$("#upd");el.textContent="Checking…";
+  try{const r=await fetch("/api/update/check"),j=await r.json();
+    if(!r.ok){el.textContent=j.error||"Could not check";return}
+    if(!j.update_available){el.textContent="You're up to date.";return}
+    el.innerHTML="Version "+esc(j.latest)+" is available. <a href='"+esc(j.url)+"' target='_blank' rel='noopener'>Release notes</a> <button class='b p' onclick='instUpd()'>Install update</button>"}
+  catch(e){el.textContent="Could not check for updates"}}
+async function instUpd(){if(!confirm("Download and install the new version now? The web service restarts."))return;
+  const el=$("#upd");try{const r=await fetch("/api/update/install",{method:"POST",headers:{"Content-Type":"application/json"},body:"{}"}),j=await r.json();
+    if(!r.ok){el.textContent=j.error||"failed";return}el.textContent="Updating - this page reloads when the server is back…";
+    const cur=j.from,t=setInterval(async()=>{try{const h=await (await fetch("/health")).json();if(h.version&&h.version!==cur){clearInterval(t);location.reload()}}catch(e){}},3000)}
+  catch(e){el.textContent="failed"}}
 function savePower(){cfg({power:{lid:$("#pl").value,block_sleep:$("#pb").checked}},"Saved - applying…")}
 function saveAuto(){cfg({console:{autologin_user:$("#ale").checked?$("#alu").value.trim():""}},"Saved - applies at the next boot")}
 function saveWeb(){cfg({web:{port:+$("#wp").value,bind:$("#wb").value,session_hours:+$("#sh").value,https:$("#hs").checked},firewall:{enabled:$("#fw").checked}},"Saved - the service restarts")}

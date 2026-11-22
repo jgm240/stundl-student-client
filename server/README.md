@@ -30,6 +30,9 @@ By default closing the lid does **nothing** - the machine keeps running - and it
 * It's done with systemd-logind (`/etc/systemd/logind.conf.d/ssc-power.conf`) and by masking the sleep targets.
 * With the lid closed a laptop gets warm: keep the vents free and plug it in. Whether the screen turns off or the backlight goes dark is up to the laptop. Not tested on a real laptop lid (QEMU has none), only the generated settings are tested.
 
+## Updates
+The Overview tab of the admin panel (or `ssconfig update`, `ssconfig update --install`, `ssconfig update --rollback`) updates SSC Server from this project's GitHub releases. It only happens when you ask. The new code is unpacked into a staging folder (only the known SSC files, nothing else), every Python file is compile-checked, the new version must import and report the version of the release, and only then is it swapped in; the old version is kept in `/opt/ssc.prev` and the web service restarts. This updates SSC itself, not Debian (use `apt` for that). Honest limit: a source archive has no signature or checksum, so the update trusts GitHub's TLS and the project's repository.
+
 ## Wi-Fi
 The image includes `wpa_supplicant` and firmware for common Wi-Fi chips (Intel, Atheros, Realtek, Broadcom, Ralink; Debian's
 `non-free-firmware` packages, redistributed under their own licences). Chips that need other firmware won't work out of the box.

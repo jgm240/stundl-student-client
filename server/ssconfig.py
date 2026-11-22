@@ -9,6 +9,7 @@
   ssconfig set <setting> <val>  change one setting     e.g.  ssconfig set links.long true
                                                              ssconfig set network.mode static
   ssconfig ip <addr/len> <gateway> [dns,dns]   fixed IP address       ssconfig dhcp   automatic address
+  ssconfig update [--install|--rollback]   check for / install a newer SSC from GitHub
   ssconfig lid ignore|suspend|poweroff|status   what closing a laptop lid does (ignore = keep running)
   ssconfig sleep block|allow    never (or sometimes) suspend
   ssconfig autologin on [user]|off|status   log in on the console without a password
@@ -215,6 +216,32 @@ def wifi_set(ssid, passphrase=None, open_net=False, hidden=False, country=None):
     fix_owner()
     apply_parts(sorted(set(changed(old, new) + ["network"])))
     return new
+
+
+def cmd_update(args):
+    """ssconfig update            check GitHub for a newer release
+       ssconfig update --install  install it (needs the network; the web service restarts)
+       ssconfig update --rollback go back to the version that was installed before"""
+    import ssc_version
+    import updater
+    try:
+        if "--rollback" in args:
+            print("Back to", updater.rollback())
+            return 0
+        info = updater.check()
+        print(f"Installed: {info['current']}   Latest on GitHub: {info['latest'] or 'unknown'}")
+        if not info["update_available"]:
+            print("You're up to date.")
+            return 0
+        print("A newer version is available:", info["url"])
+        if "--install" not in args:
+            print("Install it with:  ssconfig update --install")
+            return 0
+        print("Installed:", updater.install_server(log=print))
+        return 0
+    except updater.UpdateError as e:
+        print("Update:", e)
+        return 1
 
 
 def cmd_lid(args):
@@ -644,6 +671,8 @@ def main(argv=None):
             return cmd_autologin(rest)
         if c == "lid":
             return cmd_lid(rest)
+        if c == "update":
+            return cmd_update(rest)
         if c == "sleep":
             return cmd_sleep(rest)
         if c == "dhcp":

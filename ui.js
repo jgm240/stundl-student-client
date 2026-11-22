@@ -115,7 +115,6 @@ var D = [
 ["due in {n} days ({d})", "fällig in {n} Tagen ({d})", "dans {n} jours ({d})", "en {n} días ({d})", "tra {n} giorni ({d})", "em {n} dias ({d})", "over {n} dagen ({d})", "za {n} dni ({d})"],
 ["{n} day overdue ({d})", "{n} Tag überfällig ({d})", "{n} jour de retard ({d})", "{n} día de retraso ({d})", "{n} giorno di ritardo ({d})", "{n} dia de atraso ({d})", "{n} dag te laat ({d})", "{n} dzień zaległości ({d})"],
 ["{n} days overdue ({d})", "{n} Tage überfällig ({d})", "{n} jours de retard ({d})", "{n} días de retraso ({d})", "{n} giorni di ritardo ({d})", "{n} dias de atraso ({d})", "{n} dagen te laat ({d})", "{n} dni zaległości ({d})"],
-["due {d}", "fällig {d}", "pour le {d}", "para el {d}", "per il {d}", "para {d}", "tegen {d}", "na {d}"],
 ["+ Plan", "+ Plan", "+ Plan", "+ Plan", "+ Piano", "+ Plano", "+ Plan", "+ Plan"],
 ["Restore", "Wiederherstellen", "Restaurer", "Restaurar", "Ripristina", "Restaurar", "Herstellen", "Przywróć"],
 ["Dismiss", "Ausblenden", "Masquer", "Descartar", "Nascondi", "Dispensar", "Verbergen", "Ukryj"],
@@ -215,6 +214,19 @@ var D = [
 ["Copy wall-display link", "Wanddisplay-Link kopieren", "Copier le lien d'affichage mural", "Copiar enlace de pantalla de pared", "Copia link per display a muro", "Copiar ligação do ecrã de parede", "Wanddisplay-link kopiëren", "Kopiuj link do wyświetlacza ściennego"],
 ["School:", "Schule:", "École :", "Centro:", "Scuola:", "Escola:", "School:", "Szkoła:"],
 ["Show on the Parent page", "Auf der Eltern-Seite anzeigen", "Afficher sur la page Parents", "Mostrar en la página de padres", "Mostra nella pagina genitori", "Mostrar na página dos pais", "Tonen op de ouderpagina", "Pokaż na stronie dla rodziców"],
+// ---- updates
+["Updates", "Updates", "Mises à jour", "Actualizaciones", "Aggiornamenti", "Atualizações", "Updates", "Aktualizacje"],
+["Check for updates", "Nach Updates suchen", "Rechercher des mises à jour", "Buscar actualizaciones", "Cerca aggiornamenti", "Procurar atualizações", "Controleren op updates", "Sprawdź aktualizacje"],
+["Checking…", "Prüfe…", "Vérification…", "Comprobando…", "Controllo…", "A verificar…", "Controleren…", "Sprawdzanie…"],
+["Version {v}", "Version {v}", "Version {v}", "Versión {v}", "Versione {v}", "Versão {v}", "Versie {v}", "Wersja {v}"],
+["You're up to date.", "Du bist auf dem neuesten Stand.", "Vous êtes à jour.", "Estás al día.", "Sei aggiornato.", "Está atualizado.", "Je bent up-to-date.", "Masz najnowszą wersję."],
+["Version {v} is available.", "Version {v} ist verfügbar.", "La version {v} est disponible.", "La versión {v} está disponible.", "La versione {v} è disponibile.", "A versão {v} está disponível.", "Versie {v} is beschikbaar.", "Dostępna jest wersja {v}."],
+["Release notes", "Versionshinweise", "Notes de version", "Notas de la versión", "Note di rilascio", "Notas de versão", "Release-opmerkingen", "Informacje o wydaniu"],
+["Download update", "Update herunterladen", "Télécharger la mise à jour", "Descargar actualización", "Scarica aggiornamento", "Transferir atualização", "Update downloaden", "Pobierz aktualizację"],
+["Install update", "Update installieren", "Installer la mise à jour", "Instalar actualización", "Installa aggiornamento", "Instalar atualização", "Update installeren", "Zainstaluj aktualizację"],
+["Downloading…", "Lade herunter…", "Téléchargement…", "Descargando…", "Download in corso…", "A transferir…", "Downloaden…", "Pobieranie…"],
+["Saved to {p}. Quit SSC and unpack it over the old one.", "Gespeichert unter {p}. SSC beenden und über die alte Version entpacken.", "Enregistré dans {p}. Quittez SSC et décompressez par-dessus l'ancienne version.", "Guardado en {p}. Cierra SSC y descomprímelo sobre la versión anterior.", "Salvato in {p}. Chiudi SSC e decomprimi sopra la vecchia versione.", "Guardado em {p}. Feche o SSC e descompacte por cima da versão antiga.", "Opgeslagen in {p}. Sluit SSC af en pak het over de oude versie uit.", "Zapisano w {p}. Zamknij SSC i rozpakuj nad starą wersją."],
+["The server is updating and restarts in a moment…", "Der Server wird aktualisiert und startet gleich neu…", "Le serveur se met à jour et redémarre dans un instant…", "El servidor se está actualizando y se reiniciará en un momento…", "Il server si sta aggiornando e si riavvierà a breve…", "O servidor está a atualizar e reinicia em instantes…", "De server wordt bijgewerkt en start zo opnieuw op…", "Serwer się aktualizuje i zaraz uruchomi się ponownie…"],
 // ---- parent page, login, chrome
 ["School overview", "Schulübersicht", "Aperçu scolaire", "Resumen escolar", "Panoramica scolastica", "Resumo escolar", "Schooloverzicht", "Przegląd szkolny"],
 ["Offline - showing the last data received ({d}).", "Offline – zuletzt empfangene Daten ({d}).", "Hors ligne – dernières données reçues ({d}).", "Sin conexión: se muestran los últimos datos recibidos ({d}).", "Offline: ultimi dati ricevuti ({d}).", "Offline – a mostrar os últimos dados recebidos ({d}).", "Offline – laatst ontvangen gegevens ({d}).", "Offline – ostatnio odebrane dane ({d})."],
@@ -254,7 +266,7 @@ function addRows(rows) {
     ORDER.forEach(function (lang, i) { if (r[i + 1]) (exact[lang] = exact[lang] || {})[key] = r[i + 1]; });
     if (key.indexOf("{") >= 0) {
       var names = [];
-      var re = "^" + key.replace(/[.*+?^$()|[\]\\]/g, "\\$&").replace(/\{(\w+)\}/g, function (_, n) { names.push(n); return "(.+?)"; }) + "$";
+      var re = "^" + key.replace(/[.*+?^$()|[\]\\]/g, "\\$&").replace(/\{(\w+)\}/g, function (_, n) { names.push(n); return "nabeo".indexOf(n) >= 0 && n.length === 1 ? "(\\d+)" : "(.+?)"; }) + "$";   // counts are digits only: "{n} done" must not swallow a sentence
       patterns.push({ key: key, re: new RegExp(re), names: names, weight: key.replace(/\{\w+\}/g, "").length });
     }
   });

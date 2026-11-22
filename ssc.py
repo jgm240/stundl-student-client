@@ -26,6 +26,7 @@ from urllib.parse import parse_qs, quote, urlparse
 from urllib.request import Request, urlopen
 
 import core
+from ssc_version import VERSION as SSC_VERSION
 import jobs
 import vault
 
@@ -345,6 +346,28 @@ def watch_status():
     except ImportError:
         ble = False
     return dict(address=core.config().get("pinetime_address"), bluetooth=ble)
+
+
+def cmd_update(a):
+    import updater
+    try:
+        info = updater.check()
+    except updater.UpdateError as e:
+        sys.exit(f"Update: {e}")
+    print(f"Installed: {info['current']}   Latest on GitHub: {info['latest'] or 'unknown'}")
+    if not info["update_available"]:
+        return print("You're up to date.")
+    print("A newer version is available:", info["url"])
+    if info["flavor"] == "server":
+        return print("This is an SSC Server: run  ssconfig update --install")
+    if not a.download:
+        return print("Download it with:  ssc update --download")
+    try:
+        f, v = updater.download_app(Path.home() / "Downloads", progress=None)
+    except updater.UpdateError as e:
+        sys.exit(f"Update: {e}")
+    print(f"Saved {f} (checksum verified). Quit SSC, then unpack it over the old one." if info["flavor"] == "app" else
+          f"Saved {f} (checksum verified). From a source folder you can also run:  git pull")
 
 
 def cmd_pinetime(a):
@@ -830,9 +853,16 @@ def make_handler(port=None):
             if u.path == "/api/config":
                 c = core.config()
                 return self.send(200, json.dumps(dict(configured=bool(c.get("server") and c.get("school")) or c.get("sync_mode") == "direct", server=c.get("server"),
-                                                      school=c.get("school"), browser=c.get("browser", "auto"), login=LOGIN)))
+                                                      school=c.get("school"), browser=c.get("browser", "auto"), login=LOGIN,
+                                                      version=SSC_VERSION)))
             if u.path == "/api/prefs":
                 return self.send(200, json.dumps(core.clean_prefs(core.config().get("prefs"))))
+            if u.path == "/api/update/check":
+                import updater
+                try:
+                    return self.send(200, json.dumps(updater.check()))
+                except updater.UpdateError as e:
+                    return self.send(502, json.dumps({"error": str(e), "current": updater.ssc_version.VERSION, "flavor": updater.flavor()}))
             if u.path == "/api/watch":
                 return self.send(200, json.dumps(watch_status()))
             if u.path == "/api/parent":
@@ -906,6 +936,17 @@ def make_handler(port=None):
                 core.plan_delete(con, body.get("id", 0))
             elif path == "/api/prefs":
                 core.save_config({**core.config(), "prefs": core.clean_prefs(body)})
+            elif path == "/api/update/download":
+                import updater
+                if updater.flavor() == "server":
+                    return self.send(400, json.dumps({"error": "this is an SSC Server: use Install update"}))
+                try:
+                    f, v = updater.download_app(Path.home() / "Downloads")
+                    return self.send(200, json.dumps({"path": str(f), "version": v}))
+                except updater.UpdateError as e:
+                    return self.send(502, json.dumps({"error": str(e)}))
+            elif path == "/api/update/install":
+                return self.send(400, json.dumps({"error": "installing updates is only available on an SSC Server"}))
             elif path == "/api/watch/scan":
                 try:
                     import asyncio, pinetime
@@ -1031,6 +1072,8 @@ def main():
     x.add_argument("action", choices=["scan", "pair", "sync", "test", "forget"], nargs="?", default="sync")
     x.add_argument("address", nargs="?")
     x.set_defaults(f=cmd_pinetime)
+    x = sp.add_parser("update", help="check GitHub for a newer SSC (and download it)")
+    x.add_argument("--download", action="store_true", help="download the release file for this system (checksum verified)"); x.set_defaults(f=cmd_update)
     x = sp.add_parser("imgen", help="make a printable access card (logo, address, user, password, notes)")
     x.add_argument("rest", nargs=argparse.REMAINDER)
     x.set_defaults(f=lambda a: sys.exit(__import__("ssc_imgen").main(a.rest)))

@@ -343,6 +343,33 @@ class ServerTests(unittest.TestCase):
         self.assertIn("root.SSCUI = API", Client(self.port).req("GET", "/")[1])               # the login page too
         self.assertNotIn("SSC_PREFS_API=true", Client(self.port).req("GET", "/")[1])             # ...but it has no account to save to
 
+    def test_update_endpoints_are_admin_only_and_go_through_the_root_helper(self):
+        import updater
+        old = updater.releases
+        rel = dict(tag="v9.0.0", version="9.0.0", prerelease=False, url="https://github.com/x/y/releases/tag/v9.0.0", notes="n", published="", assets=[])
+        updater.releases = lambda: [rel]
+        try:
+            u, a = Client(self.port), Client(self.port)
+            u.login("anna", "longenoughpw"), a.login("boss", "twelve-chars!")
+            self.assertEqual(Client(self.port).req("GET", "/api/update/check")[0], 403)
+            self.assertEqual(u.req("GET", "/api/update/check")[0], 403)
+            self.assertEqual(u.req("POST", "/api/update/install", {})[0], 403)
+            s, b, _ = a.req("GET", "/api/update/check")
+            info = json.loads(b)
+            self.assertEqual((s, info["update_available"], info["latest"], info["flavor"]), (200, True, "9.0.0", "server"))
+            req = serverconf.state_dir() / "apply" / "request.json"
+            req.unlink(missing_ok=True)
+            s, b, _ = a.req("POST", "/api/update/install", {})
+            self.assertEqual(s, 200)
+            self.assertEqual(json.loads(req.read_text())["parts"], ["update"])                   # the web service only asks; root does the work
+            self.assertTrue(any(e["event"] == "update-requested" for e in json.loads(a.req("GET", "/api/admin/audit")[1])))
+            updater.releases = lambda: [dict(rel, tag="v0.0.1", version="0.0.1")]
+            self.assertEqual(a.req("POST", "/api/update/install", {})[0], 409)                  # nothing newer: no request
+            updater.releases = lambda: (_ for _ in ()).throw(updater.UpdateError("can't reach GitHub"))
+            self.assertEqual(a.req("GET", "/api/update/check")[0], 502)
+        finally:
+            updater.releases = old
+
     def test_watch_api_is_admin_only_and_validates(self):
         g = Client(self.port)
         g.login("anna", "longenoughpw")

@@ -17,7 +17,7 @@ import core
 import serverconf
 import ssc
 
-VERSION = "1.0.0-beta.5"
+from ssc_version import VERSION
 HERE = Path(__file__).resolve().parent
 START = time.time()
 
@@ -148,6 +148,14 @@ def make_handler():
                 if not s:
                     return self.j(401, {"error": "not signed in"})
                 return self.j(200, {} if s.get("anon") else auth.get_prefs(s["name"]))
+            if u.path == "/api/update/check":
+                if not (s and s["role"] == "admin"):
+                    return self.j(403, {"error": "admin only"})
+                import updater
+                try:
+                    return self.j(200, dict(updater.check(), flavor="server", apply=apply_result()))
+                except updater.UpdateError as e:
+                    return self.j(502, {"error": str(e), "current": VERSION, "flavor": "server"})
             if u.path == "/api/me":
                 return self.j(200, {"name": s["name"], "role": s["role"]}) if s else self.j(401, {"error": "not signed in"})
             if u.path.startswith("/api/admin/"):
@@ -167,6 +175,20 @@ def make_handler():
             u = urlparse(self.path)
             if u.path == "/api/login":
                 return self.login()
+            if u.path == "/api/update/install":
+                s = self.sess()
+                if not (s and s["role"] == "admin"):
+                    return self.j(403, {"error": "admin only"})
+                import updater
+                try:                                     # re-checked here; the root helper downloads and verifies it again by itself
+                    info = updater.check()
+                except updater.UpdateError as e:
+                    return self.j(502, {"error": str(e)})
+                if not info["update_available"]:
+                    return self.j(409, {"error": "already up to date", "current": VERSION})
+                request_apply(["update"])
+                auth.audit(auth.db(), s["name"], "update-requested", info["latest"], self.ip())
+                return self.j(200, {"requested": True, "from": VERSION, "to": info["latest"]})
             if u.path == "/api/prefs":
                 s = self.sess()
                 b = self.body()
