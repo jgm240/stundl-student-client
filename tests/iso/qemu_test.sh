@@ -32,7 +32,9 @@ if [ "$MODE" = live ]; then
   for i in $(seq 1 $((100*SLOW))); do grep -q "SSC Server" "$W/serial.log" 2>/dev/null && grep -q "login:" "$W/serial.log" 2>/dev/null && break; sleep 4; done
   tail -n 30 "$W/serial.log" || true
   grep -q "login:" "$W/serial.log" || { echo "LIVE BOOT FAILED"; exit 1; }
-  echo "LIVE BOOT OK"; sleep 15; screen_check "$W" && echo "LIVE CONSOLE SHOWS TEXT OK"; exit $?
+  echo "LIVE BOOT OK"
+  if [ "${UEFI:-0}" = 1 ]; then exit 0; fi       # UEFI: the boot menu stays on screen, so a screenshot proves nothing here
+  sleep 15; screen_check "$W" && echo "LIVE CONSOLE SHOWS TEXT OK"; exit $?
 fi
 
 # ---- install mode
@@ -65,6 +67,6 @@ test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18080/data.json)
 echo "WEB + AUTH OK"
 # the SCREEN (tty1) must show a login prompt, not a blank cursor: screenshot via the QEMU monitor, count lit pixels
 sleep 20
-screen_check "$W"
+screen_check "$W" || { echo "---- boot log (framebuffer / drm / efi lines) ----"; grep -i "fb\|drm\|efi\|framebuffer\|simple\|vga" $W/boot.log | head -40; exit 1; }
 echo "CONSOLE SHOWS TEXT OK"
 echo "ALL INSTALL CHECKS OK ($ARCH)"

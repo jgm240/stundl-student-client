@@ -153,8 +153,13 @@ def install(ans, run, root=TARGET, efi=None, a=None):
         if not run.dry:   # the image ships no /etc/default/grub, so write the whole file
             (root / "etc/default").mkdir(parents=True, exist_ok=True)
             (root / "etc/default/grub").write_text(
-                'GRUB_DEFAULT=0\nGRUB_TIMEOUT=2\nGRUB_DISTRIBUTOR="SSC Server"\nGRUB_CMDLINE_LINUX_DEFAULT="quiet"\n'
-                'GRUB_CMDLINE_LINUX="console=tty0 console=ttyS0,115200 nomodeset"\nGRUB_DISABLE_OS_PROBER=true\n# UEFI: hand the firmware framebuffer to the kernel, otherwise the screen stays blank (only a cursor)\nGRUB_GFXMODE=auto\nGRUB_GFXPAYLOAD_LINUX=keep\nGRUB_TERMINAL_OUTPUT="gfxterm"\n')
+                'GRUB_DEFAULT=0\nGRUB_TIMEOUT=2\nGRUB_DISTRIBUTOR="SSC Server"\nGRUB_CMDLINE_LINUX_DEFAULT=""\n'
+                'GRUB_CMDLINE_LINUX="console=tty0 console=ttyS0,115200"\nGRUB_DISABLE_OS_PROBER=true\n')
+            # UEFI only: hand the firmware framebuffer on to the kernel, otherwise the screen stays blank (only a cursor).
+            # A condition in grub.cfg, so the same disk still boots fine in BIOS mode.
+            g = root / "etc/grub.d/09_ssc_efi"
+            g.write_text("#!/bin/sh\ncat <<'EOF'\nif [ \"${grub_platform}\" = \"efi\" ]; then\n  insmod efi_gop\n  set gfxpayload=keep\nfi\nEOF\n")
+            g.chmod(0o755)
 
         step("Installing the boot loader")
         ch("update-initramfs", "-u", "-k", "all")
