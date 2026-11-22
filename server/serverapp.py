@@ -17,7 +17,7 @@ import core
 import serverconf
 import ssc
 
-VERSION = "1.0.0-beta.2"
+VERSION = "1.0.0-beta.3"
 HERE = Path(__file__).resolve().parent
 START = time.time()
 

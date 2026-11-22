@@ -5,7 +5,7 @@ on:
     inputs:
       version:
         description: "Version label for the file names"
-        default: "1.0.0-beta.2"
+        default: "1.0.0-beta.3"
   push:
     paths: ["server/**", "tests/test_server.py", "tests/iso/**", ".github/workflows/server-iso.yml", "untis_direct.py"]
 
