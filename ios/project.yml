@@ -19,6 +19,8 @@ targets:
       - path: Assets.xcassets
       - path: ../parent.html          # the very same Parent page the Mac serves, bundled so it works offline
         buildPhase: resources
+      - path: ../ui.js
+        buildPhase: resources
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.stundl.ssc.safe
@@ -47,6 +49,8 @@ targets:
       - path: Mobile
       - path: Assets.xcassets
       - path: ../parent.html
+        buildPhase: resources
+      - path: ../ui.js
         buildPhase: resources
     settings:
       base:

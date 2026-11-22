@@ -209,9 +209,50 @@ def _unwrap(d):
     return (d.get("data", d) if isinstance(d, dict) else d) or {}
 
 
+# ---- per-user interface preferences (language, mode, theme palette, accent) - must match ui.js
+PREF_LANGS = ("en", "de", "fr", "es", "it", "pt", "nl", "pl")
+PREF_MODES = ("system", "light", "dark")
+PREF_PALETTES = ("default", "paper", "ocean", "forest", "midnight", "rose", "graphite")
+PREF_ACCENTS = ("indigo", "blue", "teal", "green", "orange", "pink", "purple", "slate")
+
+
+def clean_prefs(d):
+    """Only known keys with known values survive: preferences are stored per user and echoed back into pages."""
+    d = d if isinstance(d, dict) else {}
+    out = {}
+    for key, allowed in (("lang", PREF_LANGS), ("theme", PREF_MODES), ("palette", PREF_PALETTES), ("accent", PREF_ACCENTS)):
+        if d.get(key) in allowed:
+            out[key] = d[key]
+    return out
+
+
+UI_MARK = "<!--SSC-UI-->"
+
+
+def load_page(path, prefs_api=False):
+    """An HTML page with the shared front-end runtime (ui.js: languages, themes, accent colours) inlined at <!--SSC-UI-->.
+    prefs_api=True lets the page save the user's preferences through /api/prefs (only pages served by an app server, never
+    the read-only Parent link server)."""
+    path = Path(path)
+    html = path.read_text(encoding="utf-8")
+    if UI_MARK in html:
+        js = None
+        for d in (path.parent, path.parent.parent, APPDIR):
+            f = d / "ui.js"
+            if f.exists():
+                js = f.read_text(encoding="utf-8")
+                break
+        block = ("<script>window.SSC_PREFS_API=true;</script>" if prefs_api else "") + (("<script>" + js.replace("</script", "<\\/script") + "</script>") if js else "")
+        html = html.replace(UI_MARK, block, 1)
+    return html
+
+
 def ymd(v):
     s = str(v or "")
-    return f"{s[:4]}-{s[4:6]}-{s[6:]}" if s.isdigit() and len(s) == 8 else s
+    if s.isdigit() and len(s) == 8:
+        return f"{s[:4]}-{s[4:6]}-{s[6:]}"
+    m = re.match(r"^(\d{4}-\d{2}-\d{2})[T ]", s)        # "2026-11-23T08:00:00" -> the date part
+    return m.group(1) if m else s
 
 
 def hhmm(v):
@@ -886,7 +927,7 @@ def write_snapshot(template):
     HOME.mkdir(parents=True, exist_ok=True)
     payload = json.dumps(st)
     (HOME / "snapshot.json").write_text(payload, encoding="utf-8")
-    html = Path(template).read_text(encoding="utf-8")
+    html = load_page(template)
     html = html.replace("<script>\n", "<script>window.__SNAPSHOT__=" + payload.replace("</", "<\\/") + ";</script>\n<script>\n", 1)
     (HOME / "offline.html").write_text(html, encoding="utf-8")
     (HOME / "mobile.html").write_text(render_static(st), encoding="utf-8")

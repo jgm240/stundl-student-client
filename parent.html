@@ -2,7 +2,8 @@
 <meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow">
 <title>School overview</title>
 <meta name="color-scheme" content="light dark">
-<script>try{var t=localStorage.getItem("ssc-theme");if(t==="light"||t==="dark")document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+<!--SSC-UI-->
+<script>if(!window.SSCUI){try{document.write('<script src="ui.js"><\/script>')}catch(e){}}if(!window.SSCUI)window.SSCUI={locale:function(){return"en-GB"},t:function(s){return s},tr:function(s){return s},open:function(){},mount:function(){},onChange:function(){},set:function(){}};</script>
 <style>
 :root{--bg:#f4f6fb;--card:#fff;--fg:#14161a;--mut:#6b7280;--acc:#2563eb;--bad:#dc2626;--ok:#16a34a;--warn:#d97706;--line:#e5e7eb}
 @media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0e1117;--card:#181c25;--fg:#f2f4f8;--mut:#9aa3b2;--acc:#60a5fa;--bad:#f87171;--ok:#4ade80;--warn:#fbbf24;--line:#262c38}}
@@ -27,6 +28,11 @@ main{padding:0 14px 28px;max-width:1100px;margin:auto}
 .lw .det{display:none;margin:0 0 8px 94px;padding:10px 12px;border-radius:10px;background:var(--bg);font-size:.92em}.lw .det.open{display:block}.lw .det small{display:inline-block;min-width:92px;color:var(--mut);text-transform:uppercase;letter-spacing:.05em;font-size:.75em}
 .lw .row:not(.nohov){cursor:pointer}.chip{font-size:.7em;font-weight:700;padding:1px 7px;border-radius:99px;background:color-mix(in srgb,var(--warn) 22%,transparent);color:var(--warn)}
 #themebtn{padding:7px 10px}
+.t.wide{width:118px}
+.subj{--h:230;display:inline-flex;align-items:center;gap:6px;font-weight:650;font-size:.88em;padding:1px 9px 1px 8px;border-radius:99px;background:color-mix(in srgb,hsl(var(--h) 70% 52%) 16%,var(--card));border:1px solid color-mix(in srgb,hsl(var(--h) 65% 50%) 32%,var(--line))}
+.subj::before{content:"";width:7px;height:7px;border-radius:50%;background:hsl(var(--h) 65% 52%)}
+.subj.none{--h:220;color:var(--mut);border-style:dashed;font-weight:500}
+body.wall .subj{font-size:.8em}
 #err{color:var(--warn);font-size:13px;padding:0 14px}
 /* wall display */
 body.wall #app{height:100vh;padding:2.2vmin;display:grid;gap:2.2vmin;grid-template-columns:1.1fr 1fr;grid-template-rows:auto minmax(0,.75fr) minmax(0,1.25fr)}
@@ -45,17 +51,16 @@ document.body.classList.toggle("wall",WALL);
 const $=s=>document.querySelector(s),esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const pad=n=>String(n).padStart(2,"0"),iso=d=>`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
 const mins=s=>+s.slice(11,13)*60+ +s.slice(14,16),hm=s=>s.slice(11,16);
-const dayName=s=>new Date(s+"T12:00").toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"short"});
+const hue=t=>{let h=0;for(const c of String(t||"?"))h=(h*31+c.charCodeAt(0))%360;return h};
+const subjChip=t=>t?`<span class="subj" style="--h:${hue(t)}">${esc(t)}</span>`:`<span class="subj none">No subject</span>`;
+const dShort=s=>s?new Date(s+"T12:00").toLocaleDateString(SSCUI.locale(),{day:"numeric",month:"short"}):"?";
+const dWeek=s=>s?new Date(s+"T12:00").toLocaleDateString(SSCUI.locale(),{weekday:"short",day:"numeric",month:"short"}):"?";
+const dayName=s=>new Date(s+"T12:00").toLocaleDateString(SSCUI.locale(),{weekday:"short",day:"numeric",month:"short"});
 let D=null,tab="today",wk=null;
-const THEMES=["system","light","dark"];
-const getTheme=()=>{try{return localStorage.getItem("ssc-theme")||"system"}catch(e){return"system"}};
-const themeIcon=()=>({system:"🖥",light:"☀️",dark:"🌙"})[getTheme()];
-function cycleTheme(){const m=THEMES[(THEMES.indexOf(getTheme())+1)%3],r=document.documentElement;
-  m==="system"?r.removeAttribute("data-theme"):r.setAttribute("data-theme",m);try{localStorage.setItem("ssc-theme",m)}catch(e){}render()}
 const has=k=>D&&D.sections.includes(k),all=()=>Object.values(D.timetable||{}).flat().sort((a,b)=>a.start<b.start?-1:1);
 const TABS={today:"Today",timetable:"Timetable",homework:"Homework",exams:"Exams",plan:"Study plan",grades:"Grades",absences:"Absences",changes:"Changes"};
 let off=false,fetchedAt=0;
-const banner=()=>{$("#err").textContent=off?"Offline - showing the last data received"+(fetchedAt?" ("+new Date(fetchedAt).toLocaleString("en-GB")+")":"")+".":""};
+const banner=()=>{$("#err").textContent=off?"Offline - showing the last data received"+(fetchedAt?" ("+new Date(fetchedAt).toLocaleString(SSCUI.locale())+")":"")+".":""};
 async function load(){
   if(window.SSC_NATIVE)return;   // inside the SSC-SAFE app: the app fetches the data and keeps the offline cache
   try{const r=await fetch("data.json",{cache:"no-store"});if(!r.ok)throw 0;D=await r.json();off=false;fetchedAt=Date.now();
@@ -67,9 +72,9 @@ const detail=e=>[["Subject",e.subject_long],["Teacher",e.teacher_long],["Room",e
 const chip=e=>(e.changes&&e.changes.length)?` <span class="chip">changed</span>`:"";
 const lessonRow=e=>`<div class="lw"><div class="row ${e.cancelled?"x":""}" ${WALL?"":`onclick="this.nextElementSibling.classList.toggle('open')"`}><span class="t">${hm(e.start)}–${hm(e.end)}</span><span class="s">${esc(e.subject||"Lesson")}</span>${chip(e)}<span class="mut">${esc(e.room)} ${esc(e.teacher)}</span>${e.cancelled?`<span style="color:var(--bad)">cancelled</span>`:""}${e.info&&!e.topic?`<span class="mut">${esc(e.info)}</span>`:""}${e.topic&&!WALL?`<span class="topic">${esc(e.topic)}</span>`:""}</div>${WALL?"":`<div class="det">${detail(e)||'<small>No more details.</small>'}</div>`}</div>`;
 const HO={missed:0,soon:1,pending:2},hwRows=(n)=>(D.homework||[]).filter(h=>h.status!=="done").sort((a,b)=>(HO[a.status]??3)-(HO[b.status]??3)||(a.due<b.due?-1:1)).slice(0,n);
-const hwRow=h=>`<div class="row"><span class="t" style="${h.status==='missed'?'color:var(--bad)':h.status==='soon'?'color:var(--warn)':''}">${esc(h.due.slice(5))}</span><span><span class="s">${esc(h.subject)}</span> ${esc(h.text)}</span></div>`;
-const exRows=n=>{const t=iso(new Date());return (D.exams||[]).filter(e=>e.date>=t).slice(0,n)};
-const exRow=e=>`<div class="row"><span class="t">${esc(e.date.slice(5))}</span><span><span class="s">${esc(e.subject)}</span> ${esc(e.text)}</span></div>`;
+const hwRow=h=>`<div class="row"><span class="t" style="${h.status==='missed'?'color:var(--bad)':h.status==='soon'?'color:var(--warn)':''}">${esc(dShort(h.due))}</span><span>${subjChip(h.subject)} ${esc(h.text)}</span></div>`;
+const exRows=n=>{const t=iso(new Date());return (D.exams||[]).filter(e=>!e.date||e.date>=t).slice(0,n)};
+const exRow=e=>`<div class="row"><span class="t wide">${esc(WALL?dShort(e.date):dWeek(e.date))}</span><span>${subjChip(e.subject)} ${e.start?`<span class="mut">${esc(e.start)}</span> `:""}${esc(e.text||"")}</span></div>`;
 const pmeta=p=>[p.subject,p.start,p.minutes?p.minutes+" min":""].filter(Boolean).join(" · ");
 const planRow=p=>`<div class="row"><span class="t">${esc(p.date.slice(5))}</span><span class="${p.done?"mut":""}">${p.done?"✓ ":""}<span class="s" ${p.done?'style="text-decoration:line-through"':""}>${esc(p.title)}</span> <span class="mut">${esc(pmeta(p))}</span>${p.notes?`<div class="mut">${esc(p.notes)}</div>`:""}</span></div>`;
 const planFrom=(n)=>{const t=iso(new Date());return (D.plan||[]).filter(p=>p.date>=t&&!(p.done&&p.date>t)).slice(0,n)};
@@ -81,7 +86,7 @@ function wall(){
   const big=cur?`<div class="mut" style="font-size:2.2vmin">NOW</div><div class="now">${esc(cur.subject_long||cur.subject)}<small>${hm(cur.start)}–${hm(cur.end)} · ${esc(cur.room)} ${esc(cur.teacher_long||cur.teacher)}</small>${cur.topic?`<small>${esc(cur.topic)}</small>`:""}</div>`:
     nxt?`<div class="mut" style="font-size:2.2vmin">NEXT</div><div class="now">${esc(nxt.subject)}<small>${hm(nxt.start)} · ${esc(nxt.room)} ${esc(nxt.teacher)}</small></div>`:
     `<div class="now">${es.length?"School's out":"No lessons today"}<small>${tmr.length?"Tomorrow starts at "+hm(tmr[0].start):""}</small></div>`;
-  return `<div class="wall-top"><div><div class="clock" id="clock">${pad(now.getHours())}:${pad(now.getMinutes())}</div><div class="date">${now.toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long"})}</div></div><div class="card" style="min-width:34vmin">${big}</div></div>
+  return `<div class="wall-top"><div><div class="clock" id="clock">${pad(now.getHours())}:${pad(now.getMinutes())}</div><div class="date">${now.toLocaleDateString(SSCUI.locale(),{weekday:"long",day:"numeric",month:"long"})}</div></div><div class="card" style="min-width:34vmin">${big}</div></div>
    <div class="card" style="grid-row:2/4"><h2>Today</h2>${es.map(lessonRow).join("")||`<div class="mut wall-sm">No lessons.</div>`}</div>
    <div class="card"><h2>Homework due</h2>${hwRows(4).map(hwRow).join("")||`<div class="mut wall-sm">Nothing open 🎉</div>`}${exRows(2).length?`<h2 style="margin-top:1.4vmin">Exams</h2>`+exRows(2).map(exRow).join(""):""}</div>
    <div class="card">${has("plan")?`<h2>Study plan</h2>${planFrom(3).map(planRow).join("")||`<div class="mut wall-sm">Nothing planned.</div>`}<h2 style="margin-top:1.4vmin">Changes</h2>${ch.slice(0,2).map(chRow).join("")||`<div class="mut wall-sm">No recent changes.</div>`}`:
@@ -98,7 +103,7 @@ function timetable(){const ws=Object.keys(D.timetable||{}).sort();if(!ws.length)
 function shift(n){const ws=Object.keys(D.timetable).sort(),i=ws.indexOf(wk)+n;if(ws[i]){wk=ws[i];render()}}
 const list=(a,f,empty)=>`<div class="card">${(a||[]).map(f).join("")||`<div class="mut">${empty}</div>`}</div>`;
 const views={today,timetable,
-  homework:()=>list(D.homework,h=>`<div class="row"><span class="t">${esc(h.due.slice(5))}</span><span><span class="s">${esc(h.subject)}</span> ${esc(h.text)}${h.done?` <span class="mut">(done)</span>`:""}</span></div>`,"No homework."),
+  homework:()=>list(D.homework,h=>`<div class="row"><span class="t">${esc(dShort(h.due))}</span><span>${subjChip(h.subject)} ${esc(h.text)}${h.done?` <span class="mut">(done)</span>`:""}</span></div>`,"No homework."),
   exams:()=>list(D.exams,exRow,"No exams."),
   plan:()=>{const t=iso(new Date()),all=D.plan||[],up=all.filter(p=>p.date>=t),old=all.filter(p=>p.date<t).reverse();
     return `<div class="card"><h2>Upcoming</h2>${up.map(planRow).join("")||`<div class="mut">Nothing planned.</div>`}</div>`+(old.length?`<div class="card" style="margin-top:10px"><h2>Last 7 days</h2>${old.map(planRow).join("")}</div>`:"")},changes:()=>list(D.changes,chRow,"No changes."),
@@ -108,7 +113,8 @@ function render(){
   if(!D)return;
   if(WALL){$("#app").innerHTML=wall();return}
   const tabs=Object.entries(TABS).filter(([k])=>has(k));if(!tabs.some(([k])=>k===tab))tab=tabs[0]?tabs[0][0]:"today";
-  $("#app").innerHTML=`<header><h1>School overview</h1>${tabs.map(([k,v])=>`<button class="${k===tab?"on":""}" onclick="tab='${k}';render()">${v}</button>`).join(" ")}<button id="themebtn" onclick="cycleTheme()" title="Theme">${themeIcon()}</button><span class="mut" style="margin-left:auto">Updated ${D.synced_at?new Date(D.synced_at*1000).toLocaleString("en-GB"):"never"} · read-only</span></header><main>${views[tab]()}</main>`}
+  $("#app").innerHTML=`<header><h1>School overview</h1>${tabs.map(([k,v])=>`<button class="${k===tab?"on":""}" onclick="tab='${k}';render()">${v}</button>`).join(" ")}<button id="themebtn" onclick="SSCUI.open()" title="Appearance" aria-label="Appearance">🎨</button><span class="mut" style="margin-left:auto">Updated ${D.synced_at?new Date(D.synced_at*1000).toLocaleString(SSCUI.locale()):"never"} · read-only</span></header><main>${views[tab]()}</main>`}
+SSCUI.onChange(()=>render());
 setInterval(()=>{const c=$("#clock");if(c){const n=new Date();c.textContent=pad(n.getHours())+":"+pad(n.getMinutes())}},1000);
 setInterval(load,60000);setInterval(()=>{if(WALL)render()},60000);load();
 </script></body></html>

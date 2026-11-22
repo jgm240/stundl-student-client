@@ -22,11 +22,11 @@ HERE = Path(__file__).resolve().parent
 START = time.time()
 
 
-def _page(name):
+def _page(name, prefs_api=True):
     for d in (HERE, core.APPDIR, HERE.parent):
         f = d / name
         if f.exists():
-            return f.read_text(encoding="utf-8")
+            return core.load_page(f, prefs_api=prefs_api)
     raise FileNotFoundError(name)
 
 
@@ -127,10 +127,10 @@ def make_handler():
             if u.path == "/api/login-info":
                 return self.j(200, {"guest": self.cfg()["web"]["guest_passwordless"], "setup_needed": not auth.has_admin()})
             if u.path == "/login":
-                return self.html(200, _page("login.html"))
+                return self.html(200, _page("login.html", prefs_api=False))
             if u.path == "/":
                 if not s:
-                    return self.html(200, _page("login.html"))
+                    return self.html(200, _page("login.html", prefs_api=False))
                 if s["role"] == "admin":
                     return self.html(200, self.chrome(_page("index.html"), s, True))
                 return self.html(200, self.chrome(_page("parent.html"), s, False))
@@ -144,6 +144,10 @@ def make_handler():
                 cfg = self.cfg()
                 secs = cfg["sections"]["user" if s["role"] != "guest" else "guest"] if s["role"] != "admin" else list(serverconf.SECTIONS)
                 return self.send(200, json.dumps(core.parent_state(sections=secs)), "application/json")
+            if u.path == "/api/prefs":
+                if not s:
+                    return self.j(401, {"error": "not signed in"})
+                return self.j(200, {} if s.get("anon") else auth.get_prefs(s["name"]))
             if u.path == "/api/me":
                 return self.j(200, {"name": s["name"], "role": s["role"]}) if s else self.j(401, {"error": "not signed in"})
             if u.path.startswith("/api/admin/"):
@@ -163,6 +167,16 @@ def make_handler():
             u = urlparse(self.path)
             if u.path == "/api/login":
                 return self.login()
+            if u.path == "/api/prefs":
+                s = self.sess()
+                b = self.body()
+                if not s:
+                    return self.j(401, {"error": "not signed in"})
+                if b is None:
+                    return self.j(415, {"error": "json only"})
+                if s.get("anon"):                      # the shared passwordless guest has nobody's settings to keep
+                    return self.j(200, {"saved": False})
+                return self.j(200, {"saved": True, "prefs": auth.set_prefs(s["name"], b)})
             if u.path == "/api/logout":
                 m = re.search(r"ssc_sess=([A-Za-z0-9_-]+)", self.headers.get("Cookie", ""))
                 auth.logout(m.group(1) if m else None)

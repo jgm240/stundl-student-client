@@ -40,6 +40,7 @@ POST = """<script>
 """
 
 src = (ROOT.parent / "parent.html").read_text(encoding="utf-8")
+src = src.replace("<!--SSC-UI-->", "<script>" + (ROOT.parent / "ui.js").read_text(encoding="utf-8").replace("</script", "<\\/script") + "</script>", 1)
 for name, wall in (("wall", "true"), ("overview", "false")):
     html = src.replace("<head>", "<head>\n" + PRE.replace("%WALL%", wall), 1)
     html = html.replace("</body>", POST + "</body>", 1)

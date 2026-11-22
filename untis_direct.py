@@ -191,7 +191,25 @@ def _items(refs, table, typ):
     return out
 
 
-def periods_to_days(result, master):
+def subject_table(master):
+    """{subject id: short name} from the master data (the same short names the timetable shows)."""
+    return {x.get("id"): (x.get("name") or x.get("longName") or "") for x in (master or {}).get("subjects", []) if x.get("id") is not None}
+
+
+def resolve_subject(v, table):
+    """A subject as the API happens to give it: a name, an id, a list of ids, or an object -> the short name ('' if unknown)."""
+    if v in (None, "", [], {}):
+        return ""
+    if isinstance(v, (list, tuple)):
+        return resolve_subject(v[0], table) if v else ""
+    if isinstance(v, dict):
+        return str(v.get("name") or v.get("shortName") or v.get("longName") or resolve_subject(v.get("id"), table) or "")
+    if isinstance(v, int) or (isinstance(v, str) and v.isdigit()):
+        return table.get(int(v), table.get(v, "")) or (str(v) if not table else "")
+    return str(v)
+
+
+def periods_to_days(result, master, lessons=None):
     tabs = {k: _lookup(master, k) for k in ("subjects", "teachers", "rooms", "klassen")}
     days = {}
     for p in (result.get("timetable") or result).get("periods") or []:
@@ -199,6 +217,9 @@ def periods_to_days(result, master):
             d = _iso(p["date"])
             state = str(p.get("cellState", "")).upper()
             status = "CANCELLED" if state in ("CANCEL", "CANCELLED") else ("CHANGED" if "SUBST" in state else "REGULAR")
+            if lessons is not None and (p.get("lessonId") or p.get("lid")) and p.get("su"):
+                sub = tabs["subjects"].get((p["su"][0] or {}).get("id"), {})
+                lessons.setdefault(p.get("lessonId") or p.get("lid"), sub.get("name") or sub.get("longName") or "")
             days.setdefault(d, []).append({
                 "duration": {"start": f"{d}T{_hhmm(p['startTime'])}", "end": f"{d}T{_hhmm(p['endTime'])}"}, "status": status,
                 "type": "NORMAL_TEACHING_PERIOD", "lessonText": p.get("lstext") or "", "substitutionText": p.get("substText") or "",
@@ -219,6 +240,7 @@ def fetch(cfg, today=None, weeks_back=1, weeks_ahead=4, post=None):
     if user.get("elemId") is not None:
         elem["id"] = user["elemId"]
     monday = today - timedelta(days=today.weekday())
+    subjects, lesson_subject = subject_table(master), {}
     out, notes = {"timetable": {}, "homework": None, "exams": None, "notes": notes_list()}, None
     notes = out["notes"]
     for w in range(-weeks_back, weeks_ahead + 1):
@@ -226,7 +248,7 @@ def fetch(cfg, today=None, weeks_back=1, weeks_ahead=4, post=None):
         try:
             res = call(cfg, "getTimetable2017", {**elem, "startDate": int(start.strftime("%Y%m%d")),
                                                   "endDate": int((start + timedelta(days=6)).strftime("%Y%m%d"))}, post=post)
-            out["timetable"][start.isoformat()] = periods_to_days(res, master)
+            out["timetable"][start.isoformat()] = periods_to_days(res, master, lesson_subject)
         except AuthError:
             raise
         except UntisError as e:
@@ -235,24 +257,62 @@ def fetch(cfg, today=None, weeks_back=1, weeks_ahead=4, post=None):
     try:
         r = call(cfg, "getHomeWork2017", span, post=post)
         hw = r.get("homeWorks") or r.get("homeworks") or r.get("homework") or []
-        out["homework"] = {"data": {"homeworks": [{"id": h.get("id"), "lessonId": h.get("lessonId"), "dueDate": h.get("dueDate") or h.get("date"),
-                                                   "date": h.get("date"), "text": h.get("text", ""), "remark": h.get("remark", ""),
-                                                   "completed": bool(h.get("completed") or h.get("done"))} for h in hw],
-                                  "lessons": [{"id": l.get("id"), "subject": l.get("subject") or l.get("su") or ""} for l in r.get("lessons", [])]}}
+        given = {l.get("id"): resolve_subject(l.get("subject") or l.get("subjectId") or l.get("su"), subjects) for l in r.get("lessons", [])}
+        lessons, items, unknown = {}, [], 0
+        for h in hw:
+            lid = h.get("lessonId")
+            subj = given.get(lid) or lesson_subject.get(lid) or resolve_subject(h.get("subject") or h.get("subjectId") or h.get("su"), subjects)
+            if lid is None:
+                lid = "hw-" + str(h.get("id"))
+            lessons[lid] = subj
+            unknown += not subj
+            items.append({"id": h.get("id"), "lessonId": lid, "dueDate": h.get("dueDate") or h.get("date"), "date": h.get("date"), "text": h.get("text", ""),
+                          "remark": h.get("remark", ""), "completed": bool(h.get("completed") or h.get("done"))})
+        out["homework"] = {"data": {"homeworks": items, "lessons": [{"id": k, "subject": v} for k, v in lessons.items()]}}
+        if unknown:
+            notes.append(f"homework: could not find the subject of {unknown} item(s) (run: ssc untis raw getHomeWork2017 to see what WebUntis sends)")
     except AuthError:
         raise
     except UntisError as e:
         notes.append(f"homework: {e}")
     try:
         r = call(cfg, "getExams2017", span, post=post)
-        out["exams"] = {"data": {"exams": [{"id": e.get("id"), "examDate": e.get("examDate"), "startTime": e.get("startTime"), "endTime": e.get("endTime"),
-                                            "subject": e.get("subject") or e.get("name") or "", "text": e.get("text") or e.get("name") or ""}
-                                           for e in r.get("exams", [])]}}
+        exams = []
+        for e in r.get("exams", []):
+            exams.append({"id": e.get("id"), "examDate": e.get("examDate") or e.get("date") or e.get("startDate"),
+                          "startTime": e.get("startTime") or e.get("start"), "endTime": e.get("endTime") or e.get("end"),
+                          "subject": resolve_subject(e.get("subject") or e.get("subjectId") or e.get("su"), subjects) or e.get("name") or "",
+                          "text": e.get("text") or e.get("name") or e.get("examType") or e.get("type") or ""})
+        out["exams"] = {"data": {"exams": exams}}
+        if any(not x["examDate"] for x in exams):
+            notes.append("exams: some exams came without a date (run: ssc untis raw getExams2017 to see what WebUntis sends)")
     except AuthError:
         raise
     except UntisError as e:
         notes.append(f"exams: {e}")
     return out
+
+
+RAW_METHODS = ("getUserData2017", "getTimetable2017", "getHomeWork2017", "getExams2017")
+
+
+def raw_call(cfg, method, post=None, today=None):
+    """What WebUntis really sends for one method (never contains the key) - to see why a field is empty."""
+    if method not in RAW_METHODS:
+        raise ValueError("method must be one of: " + ", ".join(RAW_METHODS))
+    today = today or date.today()
+    if method == "getUserData2017":
+        return call(cfg, method, post=post)
+    user = (call(cfg, "getUserData2017", post=post).get("userData")) or {}
+    elem = {"type": user.get("elemType", 5)}
+    if user.get("elemId") is not None:
+        elem["id"] = user["elemId"]
+    if method == "getTimetable2017":
+        monday = today - timedelta(days=today.weekday())
+        params = {**elem, "startDate": int(monday.strftime("%Y%m%d")), "endDate": int((monday + timedelta(days=6)).strftime("%Y%m%d"))}
+    else:
+        params = {**elem, "startDate": int((today - timedelta(days=30)).strftime("%Y%m%d")), "endDate": int((today + timedelta(days=90)).strftime("%Y%m%d"))}
+    return call(cfg, method, params, post=post)
 
 
 def notes_list():

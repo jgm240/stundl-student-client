@@ -34,6 +34,9 @@ def db():
         create table if not exists accounts(name text primary key, role text not null, pw text, created real, last_login real, disabled integer default 0);
         create table if not exists audit(id integer primary key autoincrement, at real, who text, event text, detail text, ip text);
     """)
+    if "prefs" not in [r[1] for r in c.execute("pragma table_info(accounts)")]:
+        c.execute("alter table accounts add column prefs text")          # per-user language / theme / accent
+        c.commit()
     try:
         os.chmod(core.HOME / "accounts.db", 0o600)
     except OSError:
@@ -155,6 +158,26 @@ def set_disabled(name, disabled, con=None, who="console"):
         drop_sessions(name)
 
 
+def get_prefs(name, con=None):
+    import json
+    row = (con or db()).execute("select prefs from accounts where name=?", (name,)).fetchone()
+    try:
+        return core.clean_prefs(json.loads(row[0])) if row and row[0] else {}
+    except ValueError:
+        return {}
+
+
+def set_prefs(name, prefs, con=None):
+    """Merge into the stored preferences of one account (a user only ever changes their own)."""
+    import json
+    con = con or db()
+    cur = get_prefs(name, con)
+    cur.update(core.clean_prefs(prefs))
+    con.execute("update accounts set prefs=? where name=?", (json.dumps(cur), name))
+    con.commit()
+    return cur
+
+
 def has_admin(con=None):
     return (con or db()).execute("select count(*) from accounts where role='admin' and disabled=0").fetchone()[0] > 0
 
@@ -217,15 +240,15 @@ def login(name, password, ip="", con=None, hours=12):
     return new_session(name, row[0], ip, hours)
 
 
-def new_session(name, role, ip="", hours=12):
+def new_session(name, role, ip="", hours=12, anon=False):
     sid = secrets.token_urlsafe(32)
-    SESSIONS[sid] = dict(name=name, role=role, ip=ip, exp=time.time() + hours * 3600)
+    SESSIONS[sid] = dict(name=name, role=role, ip=ip, exp=time.time() + hours * 3600, anon=anon)
     return sid
 
 
 def guest_session(ip="", hours=12):
     """Passwordless guest access (only if the admin turned it on)."""
-    return new_session("guest", "guest", ip, hours)
+    return new_session("guest", "guest", ip, hours, anon=True)
 
 
 def session(sid):

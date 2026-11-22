@@ -217,7 +217,7 @@ class ServerTests(unittest.TestCase):
             self.assertEqual(c.login(who, "longenoughpw"), 200)
             s, b, _ = c.req("GET", "/")
             self.assertIn("School overview", b)            # the Parent page
-            self.assertNotIn("Admin panel", b)
+            self.assertNotIn("href='/admin'", b)                                # no link to the admin panel
             self.assertIn(who, b)                          # "signed in as" bar
             self.assertEqual(c.req("GET", "/admin")[0], 302)
             self.assertEqual(c.req("GET", "/api/state")[0], 403)
@@ -313,6 +313,35 @@ class ServerTests(unittest.TestCase):
         self.assertIn("console", json.loads(req.read_text())["parts"])
         a.req("POST", "/api/admin/config", {"power": {"lid": "ignore"}, "console": {"autologin_user": ""}})
         self.assertEqual(a.req("POST", "/api/admin/config", {"power": {"lid": "sideways"}})[0], 400)
+
+    def test_preferences_are_per_user(self):
+        a, u, g = Client(self.port), Client(self.port), Client(self.port)
+        a.login("boss", "twelve-chars!"), u.login("anna", "longenoughpw"), g.login("gast", "longenoughpw")
+        anon = Client(self.port)
+        self.assertEqual(anon.req("GET", "/api/prefs")[0], 401)
+        self.assertEqual(anon.req("POST", "/api/prefs", {"lang": "de"})[0], 401)
+        self.assertEqual(json.loads(u.req("GET", "/api/prefs")[1]), {})
+        s, b, _ = u.req("POST", "/api/prefs", {"lang": "fr", "theme": "dark", "accent": "teal", "evil": "<script>", "palette": "nope"})
+        self.assertEqual(s, 200)
+        self.assertEqual(json.loads(u.req("GET", "/api/prefs")[1]), {"lang": "fr", "theme": "dark", "accent": "teal"})      # junk dropped
+        self.assertEqual(json.loads(a.req("GET", "/api/prefs")[1]), {})                                                       # other users unaffected
+        a.req("POST", "/api/prefs", {"lang": "pl", "palette": "forest"})
+        self.assertEqual(json.loads(a.req("GET", "/api/prefs")[1]), {"lang": "pl", "palette": "forest"})
+        self.assertEqual(json.loads(u.req("GET", "/api/prefs")[1])["lang"], "fr")
+        u.req("POST", "/api/prefs", {"theme": "light"})                                                                       # a change merges, it does not wipe
+        self.assertEqual(json.loads(u.req("GET", "/api/prefs")[1]), {"lang": "fr", "theme": "light", "accent": "teal"})
+        self.assertEqual(g.req("POST", "/api/prefs", {"lang": "es"})[0], 200)                                                 # guests (named accounts) keep theirs too
+        self.assertEqual(json.loads(g.req("GET", "/api/prefs")[1])["lang"], "es")
+        self.assertEqual(u.req("POST", "/api/prefs", None, {"Content-Type": "text/plain"})[0], 415)
+
+    def test_pages_carry_the_runtime_and_only_app_pages_may_save_prefs(self):
+        a = Client(self.port)
+        a.login("boss", "twelve-chars!")
+        page = a.req("GET", "/")[1]
+        self.assertIn("root.SSCUI = API", page)
+        self.assertIn("SSC_PREFS_API=true", page)
+        self.assertIn("root.SSCUI = API", Client(self.port).req("GET", "/")[1])               # the login page too
+        self.assertNotIn("SSC_PREFS_API=true", Client(self.port).req("GET", "/")[1])             # ...but it has no account to save to
 
     def test_watch_api_is_admin_only_and_validates(self):
         g = Client(self.port)
@@ -588,6 +617,48 @@ class UntisDirectTests(unittest.TestCase):
         self.assertEqual(e["position4"][0]["removed"]["shortName"], "R1")      # room changed R1 -> R2
         self.assertEqual(out["homework"]["data"]["homeworks"][0]["text"], "p.12")
         self.assertTrue(all(u == "max" and n == 6 for _, u, n in seen))         # one-time codes only; the key is never sent
+
+    def test_homework_subjects_are_resolved_whatever_shape_the_api_uses(self):
+        from datetime import date
+        master = {"subjects": [{"id": 1, "name": "M", "longName": "Mathematics"}, {"id": 2, "name": "E", "longName": "English"}, {"id": 3, "name": "BIO"}],
+                  "teachers": [], "rooms": [], "klassen": []}
+
+        def post(url, body):
+            m = body["method"]
+            if m == "getUserData2017":
+                return {"result": {"userData": {"elemType": 5, "elemId": 7}, "masterData": master}}
+            if m == "getTimetable2017":       # lesson 55 is Biology: only the timetable knows that
+                return {"result": {"timetable": {"periods": [{"date": 20261123, "startTime": 800, "endTime": 845, "su": [{"id": 3}], "lessonId": 55}]}}}
+            if m == "getHomeWork2017":
+                return {"result": {"homeWorks": [
+                    {"id": 1, "lessonId": 10, "dueDate": 20261125, "text": "a"},            # lesson says subject = id 1
+                    {"id": 2, "lessonId": 11, "dueDate": 20261126, "text": "b"},            # lesson says subject = name "English"
+                    {"id": 3, "lessonId": 55, "dueDate": 20261127, "text": "c"},            # not in the lessons list: from the timetable
+                    {"id": 4, "dueDate": 20261128, "text": "d", "subject": 2},              # subject right on the homework (an id)
+                    {"id": 5, "lessonId": 99, "dueDate": 20261129, "text": "e"}],           # nobody knows
+                    "lessons": [{"id": 10, "subject": 1}, {"id": 11, "subject": "English"}]}}
+            return {"result": {"exams": [
+                {"id": 1, "date": "2026-11-30T00:00:00", "startTime": 900, "endTime": 1000, "subjectId": 1, "name": "Test"},
+                {"id": 2, "examDate": 20261201, "startTime": 800, "subject": "E", "text": "Vocab"},
+                {"id": 3, "examDate": 20261202, "subject": {"id": 3}, "examType": "Schularbeit"}]}}
+        out = self.u.fetch(self.cfg, today=date(2026, 11, 23), weeks_back=0, weeks_ahead=0, post=post)
+        import core
+        hw = {h["text"]: h["subject"] for h in core.homework_items(out["homework"])}
+        self.assertEqual(hw, {"a": "M", "b": "English", "c": "BIO", "d": "E", "e": ""})
+        self.assertTrue(any("subject of 1 item" in n for n in out["notes"]))                 # the gap is reported, not hidden
+        ex = core.exam_items(out["exams"])
+        self.assertEqual([(e["date"], e["start"], e["subject"], e["text"]) for e in ex],
+                         [("2026-11-30", "09:00", "M", "Test"), ("2026-12-01", "08:00", "E", "Vocab"), ("2026-12-02", "", "BIO", "Schularbeit")])
+
+    def test_raw_call_shows_what_webuntis_sends(self):
+        sent = []
+
+        def post(url, body):
+            sent.append(body["method"])
+            return {"result": {"userData": {"elemType": 5, "elemId": 7}, "exams": [{"id": 1}]}}
+        self.assertIn("exams", self.u.raw_call(self.cfg, "getExams2017", post=post))
+        with self.assertRaises(ValueError):
+            self.u.raw_call(self.cfg, "deleteEverything", post=post)
 
     def test_bad_credentials_raise_auth_error(self):
         post, _ = self.fake(auth_ok=False)

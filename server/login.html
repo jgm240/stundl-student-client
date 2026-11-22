@@ -1,5 +1,6 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Sign in – Stundl Student Client</title><meta name="color-scheme" content="light dark"><meta name="robots" content="noindex">
+<!--SSC-UI-->
 <style>
 :root{--bg:#f3f5fb;--card:#fff;--text:#131826;--muted:#667085;--line:#e3e7f0;--accent:#4f46e5;--bad:#dc2626}
 @media(prefers-color-scheme:dark){:root{--bg:#0b0f17;--card:#141a26;--text:#eef1f8;--muted:#98a3b7;--line:#252f43;--accent:#8e90ff;--bad:#f87171}}
@@ -27,6 +28,7 @@ button.alt{background:transparent;color:var(--accent);border:1px solid var(--lin
   <div id="err" role="alert"></div>
   <button>Sign in</button>
   <button type="button" class="alt" id="g" hidden>Continue as guest</button>
+  <button type="button" class="alt" onclick="SSCUI.open()">Appearance</button>
   <div id="note"></div>
 </form>
 <script>

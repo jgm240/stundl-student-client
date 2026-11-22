@@ -399,6 +399,12 @@ def cmd_untis(a):
             sys.exit(f"Login failed: {e}\n{untis_direct.login_hint(e)}".rstrip())
         except OSError as e:
             sys.exit(f"Can't reach {cfg['server']}: {e}")
+    elif a.action == "raw":
+        cfg = untis_direct.load_credentials() or sys.exit("No key set.")
+        try:
+            print(json.dumps(untis_direct.raw_call(cfg, a.value or "getHomeWork2017"), indent=1, ensure_ascii=False)[:20000])
+        except (ValueError, untis_direct.UntisError, OSError) as e:
+            sys.exit(f"{e}")
     else:
         print(untis_direct.describe() or "No Untis Mobile key set.")
 
@@ -637,7 +643,7 @@ def make_parent_handler():
                 return self.reply(404, "not found")
             if m.group(2) == "/data.json":
                 return self.reply(200, parent_data(), "application/json")
-            return self.reply(200, (core.APPDIR / "parent.html").read_text(encoding="utf-8"), "text/html; charset=utf-8")
+            return self.reply(200, core.load_page(core.APPDIR / "parent.html"), "text/html; charset=utf-8")
 
         def do_other(self):
             self.reply(405, "read-only")
@@ -804,7 +810,7 @@ def make_handler(port=None):
             if not self.guard(): return
             u = urlparse(self.path)
             if u.path == "/":
-                page = (core.APPDIR / "index.html").read_text(encoding="utf-8")
+                page = core.load_page(core.APPDIR / "index.html", prefs_api=True)
                 k = parse_qs(u.query).get("k", [""])[0]
                 if k and secrets.compare_digest(k.encode(), self.server.boot.encode()):
                     sid = secrets.token_urlsafe(24)
@@ -825,6 +831,8 @@ def make_handler(port=None):
                 c = core.config()
                 return self.send(200, json.dumps(dict(configured=bool(c.get("server") and c.get("school")) or c.get("sync_mode") == "direct", server=c.get("server"),
                                                       school=c.get("school"), browser=c.get("browser", "auto"), login=LOGIN)))
+            if u.path == "/api/prefs":
+                return self.send(200, json.dumps(core.clean_prefs(core.config().get("prefs"))))
             if u.path == "/api/watch":
                 return self.send(200, json.dumps(watch_status()))
             if u.path == "/api/parent":
@@ -896,6 +904,8 @@ def make_handler(port=None):
                     return self.send(400, json.dumps({"error": str(e)}))
             elif path == "/api/plan/delete":
                 core.plan_delete(con, body.get("id", 0))
+            elif path == "/api/prefs":
+                core.save_config({**core.config(), "prefs": core.clean_prefs(body)})
             elif path == "/api/watch/scan":
                 try:
                     import asyncio, pinetime
@@ -1042,7 +1052,7 @@ def main():
     x.add_argument("--time", default="06:45", help="daily sync time")
     x.add_argument("--remind-time", default="17:30", help="daily reminder time"); x.set_defaults(f=cmd_schedule)
     x = sp.add_parser("untis", help="the Untis Mobile key for headless syncing (SSC Server)")
-    x.add_argument("action", choices=["set", "test", "clear", "status"]); x.add_argument("value", nargs="?", help="the untis://setschool?... link")
+    x.add_argument("action", choices=["set", "test", "clear", "status", "raw"]); x.add_argument("value", nargs="?", help="the untis://setschool?... link (or, for raw: getHomeWork2017 / getExams2017 / getTimetable2017)")
     x.add_argument("--server", help="e.g. xyz.webuntis.com"); x.add_argument("--school", help="the school's login name (?school=... in the WebUntis address)")
     x.add_argument("--user"); x.add_argument("--key", help="(better leave it out: it is then asked for without showing it)"); x.set_defaults(f=cmd_untis)
     x = sp.add_parser("plan", help="your study plan (shown in Parent mode)")

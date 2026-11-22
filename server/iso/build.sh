@@ -35,7 +35,7 @@ mkdir -p config/includes.chroot config/hooks/normal
 cp -r "$HERE/overlay/." config/includes.chroot/
 install -d config/includes.chroot/opt/ssc/server
 cd "$REPO"
-cp core.py ssc.py vault.py jobs.py untis_direct.py ssc_imgen.py index.html parent.html LICENSE "$WORK/config/includes.chroot/opt/ssc/"
+cp core.py ssc.py vault.py jobs.py untis_direct.py ssc_imgen.py ui.js index.html parent.html LICENSE "$WORK/config/includes.chroot/opt/ssc/"
 mkdir -p "$WORK/config/includes.chroot/opt/ssc/assets"; cp assets/icon.png "$WORK/config/includes.chroot/opt/ssc/assets/"
 for f in menu_model.py tui.py; do [ -f "$f" ] && cp "$f" "$WORK/config/includes.chroot/opt/ssc/" || true; done
 cp server/*.py server/*.html "$WORK/config/includes.chroot/opt/ssc/server/"

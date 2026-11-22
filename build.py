@@ -17,7 +17,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 WIN = sys.platform.startswith("win")
 SEP = ";" if WIN else ":"
-DATA = ["index.html", "parent.html", "assets/menubar.png", "assets/icon.png"]
+DATA = ["index.html", "parent.html", "ui.js", "assets/menubar.png", "assets/icon.png"]
 HIDDEN = ["vault", "jobs", "menu_model", "tray", "tui", "segno", "pystray", "keyring.backends.Windows" if WIN else "keyring.backends.SecretService"]
 
 
