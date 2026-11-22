@@ -17,7 +17,12 @@ NODE = shutil.which("node")
 
 
 def node(code):
-    r = subprocess.run([NODE, "-e", code], capture_output=True, text=True, timeout=60, cwd=ROOT)
+    """Run a snippet in Node. The code goes through a UTF-8 file (not the command line: Windows limits its length) and the
+    output is read as UTF-8 (not the console code page)."""
+    f = Path(tempfile.mkdtemp()) / "snippet.js"
+    code = code.replace('require("./ui.js")', "require(%s)" % json.dumps(str(ROOT / "ui.js")))
+    f.write_text(code, encoding="utf-8")
+    r = subprocess.run([NODE, str(f)], capture_output=True, encoding="utf-8", timeout=60, cwd=ROOT)
     if r.returncode != 0:
         raise AssertionError(r.stderr[-800:])
     return r.stdout
@@ -87,7 +92,7 @@ class RuntimeTests(unittest.TestCase):
             for i, js in enumerate(scripts):
                 f = Path(tempfile.mkdtemp()) / "c.js"
                 f.write_text(js, encoding="utf-8")
-                r = subprocess.run([NODE, "--check", str(f)], capture_output=True, text=True)
+                r = subprocess.run([NODE, "--check", str(f)], capture_output=True, encoding="utf-8")
                 self.assertEqual(r.returncode, 0, f"{name} script {i}: {r.stderr[:300]}")
 
 
@@ -102,7 +107,7 @@ class PageTests(unittest.TestCase):
             for i, js in enumerate(re.findall(r"<script>(.*?)</script>", html, re.S)):
                 f = Path(tempfile.mkdtemp()) / "c.js"
                 f.write_text(js, encoding="utf-8")
-                self.assertEqual(subprocess.run([NODE, "--check", str(f)], capture_output=True, text=True).returncode, 0, f"script {i}")
+                self.assertEqual(subprocess.run([NODE, "--check", str(f)], capture_output=True, encoding="utf-8").returncode, 0, f"script {i}")
 
     def test_every_page_with_a_marker_gets_it(self):
         for name in ("index.html", "parent.html", "server/login.html"):
