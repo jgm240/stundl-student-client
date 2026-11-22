@@ -281,7 +281,7 @@ class WebTests(unittest.TestCase):
         self.assertEqual(self.a.req("GET", "/api/admin/sessions")[0], 200)                        # the admin is still in
 
     def test_the_panel_has_the_new_tab(self):
-        html = (ROOT / "server/admin.html").read_text()
+        html = (ROOT / "server/admin.html").read_text(encoding="utf-8")
         for needle in ('"System"', "powerAct('reboot')", "powerAct('poweroff')", "/api/admin/logs", "downloadBackup", "restoreBackup", "signOutAll", "svcRestart", "waitBack"):
             self.assertIn(needle, html, needle)
 

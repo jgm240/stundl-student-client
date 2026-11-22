@@ -135,7 +135,7 @@ class VersionTests(unittest.TestCase):
 
     def test_version_files_agree(self):
         import re
-        self.assertEqual(re.search(r'default: "([^"]+)"', (ROOT / ".github/workflows/server-iso.yml").read_text()).group(1), ssc_version.VERSION)
+        self.assertEqual(re.search(r'default: "([^"]+)"', (ROOT / ".github/workflows/server-iso.yml").read_text(encoding="utf-8")).group(1), ssc_version.VERSION)
 
 
 class CheckTests(Base):
