@@ -89,6 +89,12 @@ def install(ans, run, root=TARGET, efi=None, a=None):
         (root / "boot/efi").mkdir(parents=True, exist_ok=True)
         run(["mount", efi_dev, str(root / "boot/efi")])
     run(["rsync", "-aHAX", "--numeric-ids", *[f"--exclude={e}" for e in plan.RSYNC_EXCLUDES], SOURCE, str(root) + "/"])
+    must_exist = ("usr/local/bin/ssconfig", "usr/local/bin/ssc-install", "usr/local/bin/ssc-imgen", "opt/ssc/ssc.py", "opt/ssc/server/ssconfig.py",
+                  "opt/ssc/server/serverapp.py", "etc/systemd/system/ssc-server.service", "etc/systemd/logind.conf.d/ssc-power.conf")
+    if not run.dry:                  # the copy must really contain the SSC tools, otherwise the new server can't be configured
+        missing = [m for m in must_exist if not (root / m).exists()]
+        if missing:
+            raise RuntimeError("the installed system is missing: " + ", ".join(missing))
     for d in ("proc", "sys", "dev", "run", "tmp", "mnt", "media"):
         (root / d).mkdir(exist_ok=True)
     os.chmod(root / "tmp", 0o1777) if not run.dry else None

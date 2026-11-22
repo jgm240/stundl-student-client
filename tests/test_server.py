@@ -495,6 +495,22 @@ class InstallPlanTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             p.validate_answers({"password": "twelve-chars!"}, two)            # auto with 2 disks is ambiguous: refuse
 
+    def test_install_refuses_a_copy_without_the_ssc_tools(self):
+        import ssc_install as si
+        import install_plan as p
+        root = Path(tempfile.mkdtemp())
+        ans = p.validate_answers({"password": "sixsix"}, [{"path": "/dev/vda", "size": 32 * 10 ** 9, "model": "", "removable": False}])
+        log = []
+
+        class Run(si.Runner):
+            def __call__(self, cmd, check=True, input=None, env=None):
+                self.log("$ " + " ".join(cmd))
+                return __import__("subprocess").CompletedProcess(cmd, 0, "", "")      # pretend every command worked; nothing is copied
+        with self.assertRaises(RuntimeError) as e:
+            si.install(ans, Run(dry=False, log=log.append), root=root, efi=False, a="amd64")
+        self.assertIn("usr/local/bin/ssconfig", str(e.exception))
+        self.assertFalse(any("grub-install" in x for x in log))                      # it stopped before touching the boot loader
+
     def test_dry_run_installs_nothing(self):
         import ssc_install as si
         import install_plan as p
