@@ -452,6 +452,17 @@ def render_interfaces(net, iface, wpa_conf=None, head=True, wol=False):
     return out
 
 
+def render_resolv(net):
+    """/etc/resolv.conf for a fixed address. ifupdown's 'dns-nameservers' line only works with the resolvconf package, which the image does not
+    have - so without this a static address could reach nothing by name (updates, mail, WebUntis). None = DHCP: the DHCP client writes it."""
+    if net["mode"] != "static":
+        return None
+    servers = list(net["dns"]) or ([net["gateway"]] if net["gateway"] else [])
+    if not servers:
+        return None
+    return "# Managed by ssconfig - changes are overwritten\n" + "".join(f"nameserver {s}\n" for s in servers[:3])
+
+
 def render_network(cfg, wired, wlan=None):
     """With Wi-Fi on (and a wireless card present) the address settings go to the Wi-Fi interface and a wired port, if any,
     just gets DHCP. Otherwise the settings go to the wired port as before."""

@@ -111,6 +111,9 @@ def apply_part(part, cfg, root=None, run=_run):
         _write(root, "etc/network/interfaces.d/ssc", serverconf.render_network(cfg, iface, wlan))
         if cfg["power"]["wol"] and iface != wlan:
             run(["ethtool", "-s", iface, "wol", "g"])
+        resolv = serverconf.render_resolv(n)
+        if resolv:
+            _write(root, "etc/resolv.conf", resolv)
         _write(root, "etc/hostname", n["hostname"] + "\n")
         hosts = root / "etc/hosts"
         try:

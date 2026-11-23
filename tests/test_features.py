@@ -107,6 +107,29 @@ class SettingsTests(unittest.TestCase):
         self.assertNotIn("ethtool -s wlan0", out)
 
 
+class ResolvTests(unittest.TestCase):
+    def test_static_address_writes_resolv_conf(self):
+        net = serverconf.validate({"network": {"mode": "static", "address": "192.168.1.50/24", "gateway": "192.168.1.1", "dns": ["9.9.9.9", "1.1.1.1"]}})["network"]
+        self.assertEqual(serverconf.render_resolv(net), "# Managed by ssconfig - changes are overwritten\nnameserver 9.9.9.9\nnameserver 1.1.1.1\n")
+        no_dns = serverconf.validate({"network": {"mode": "static", "address": "192.168.1.50/24", "gateway": "192.168.1.1"}})["network"]
+        self.assertIn("nameserver 192.168.1.1", serverconf.render_resolv(no_dns))            # the router is the usual resolver
+        self.assertIsNone(serverconf.render_resolv(serverconf.validate({})["network"]))      # DHCP: the DHCP client does it
+        bare = serverconf.validate({"network": {"mode": "static", "address": "192.168.1.50/24"}})["network"]
+        self.assertIsNone(serverconf.render_resolv(bare))
+
+    def test_the_network_part_writes_it(self):
+        d = isolate()
+        root = Path(d) / "root"
+        (root / "etc").mkdir(parents=True)
+        cfg = serverconf.validate({"network": {"mode": "static", "address": "10.0.0.5/24", "gateway": "10.0.0.1", "dns": ["10.0.0.1"]}})
+        res = applycfg.apply(["network"], cfg, root, lambda c: R())
+        self.assertTrue(res["ok"], res)
+        self.assertEqual((root / "etc/resolv.conf").read_text().count("nameserver 10.0.0.1"), 1)
+        (root / "etc/resolv.conf").write_text("nameserver 8.8.8.8\n")
+        applycfg.apply(["network"], serverconf.validate({}), root, lambda c: R())             # DHCP: left alone
+        self.assertEqual((root / "etc/resolv.conf").read_text(), "nameserver 8.8.8.8\n")
+
+
 # ------------------------------------------------------------------ wake
 class WakeTests(unittest.TestCase):
     def setUp(self):
