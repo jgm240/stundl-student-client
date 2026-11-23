@@ -109,16 +109,16 @@ def login_hint(msg):
 
 
 def save_credentials(cfg):
-    vault.set(CRED_KEY, json.dumps(cfg))
+    vault.set(core.vkey(CRED_KEY), json.dumps(cfg))
 
 
 def load_credentials():
-    raw = vault.get(CRED_KEY)
+    raw = vault.get(core.vkey(CRED_KEY))
     return json.loads(raw) if raw else None
 
 
 def clear_credentials():
-    vault.delete(CRED_KEY)
+    vault.delete(core.vkey(CRED_KEY))
 
 
 def describe():

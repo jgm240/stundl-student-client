@@ -11,7 +11,7 @@ from pathlib import Path
 
 SERVICES = [("ssc-server", "SSC web service"), ("ssh", "SSH"), ("nftables", "Firewall"), ("ssc-sync.timer", "Data sync timer"),
             ("ssc-apply.path", "Settings helper"), ("ssc-sleep.timer", "Sleep schedule: switch off"), ("ssc-wake.timer", "Sleep schedule: switch on"),
-            ("getty@tty1", "Console login (screen)")]
+            ("ssc-health.timer", "Disk health check"), ("getty@tty1", "Console login (screen)")]
 RESTARTABLE = ("ssc-server", "ssh", "nftables")
 
 LOG_UNITS = {"web": ["-u", "ssc-server"], "apply": ["-u", "ssc-apply"], "sync": ["-u", "ssc-sync"], "ssh": ["-u", "ssh"], "firewall": ["-u", "nftables"],

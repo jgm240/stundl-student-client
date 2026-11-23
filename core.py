@@ -44,9 +44,87 @@ def self_cmd(*args):
 
 
 # ------------------------------------------------------------------ storage
+# ------------------------------------------------------------------ profiles (several children / schools on one server)
+import re as _re, threading as _threading
+_PROFILE = _threading.local()
+PROFILE_RE = _re.compile(r"^[a-z0-9][a-z0-9-]{0,19}$")
+MAIN = "main"                                   # the profile every installation has (its data lives where it always did)
+HOOKS = []                                      # functions(changes: [(kind, text)], profile_id) run after changes were recorded
+
+
+def profile_id():
+    """The profile this thread works on (a web request sets it; a sync subprocess gets it from SSC_PROFILE)."""
+    return getattr(_PROFILE, "id", None) or os.environ.get("SSC_PROFILE") or MAIN
+
+
+def set_profile(pid):
+    _PROFILE.id = pid if pid and pid != MAIN and PROFILE_RE.match(str(pid)) else None
+
+
+def vkey(name):
+    """Name of a secret in the vault for the current profile (the main profile keeps the old names)."""
+    pid = profile_id()
+    return name if pid == MAIN else f"{name}@{pid}"
+
+
+def profile_list():
+    extra = config().get("profiles") or []
+    out = [{"id": MAIN, "label": str(config().get("main_label") or "Main")}]
+    out += [{"id": str(p["id"]), "label": str(p.get("label") or p["id"])} for p in extra if isinstance(p, dict) and PROFILE_RE.match(str(p.get("id", "")))]
+    return out
+
+
+def profile_ids():
+    return [p["id"] for p in profile_list()]
+
+
+def profile_add(pid, label):
+    pid = str(pid or "").strip().lower()
+    if not PROFILE_RE.match(pid) or pid == MAIN:
+        raise ValueError("profile id: letters, digits and '-' (max 20), not 'main'")
+    label = re.sub(r"[\x00-\x1f<>]", "", str(label or "")).strip()[:40] or pid
+    cfg = config()
+    if pid in profile_ids():
+        raise ValueError("that profile exists already")
+    if len(cfg.get("profiles") or []) >= 9:
+        raise ValueError("at most 10 profiles")
+    cfg["profiles"] = list(cfg.get("profiles") or []) + [{"id": pid, "label": label}]
+    save_config(cfg)
+    return pid
+
+
+def profile_rename(pid, label):
+    label = re.sub(r"[\x00-\x1f<>]", "", str(label or "")).strip()[:40]
+    if not label:
+        raise ValueError("a name is needed")
+    cfg = config()
+    if pid == MAIN:
+        cfg["main_label"] = label
+    elif pid in profile_ids():
+        cfg["profiles"] = [dict(p, label=label) if p["id"] == pid else p for p in cfg.get("profiles") or []]
+    else:
+        raise ValueError("no such profile")
+    save_config(cfg)
+
+
+def profile_remove(pid):
+    if pid == MAIN or pid not in profile_ids():
+        raise ValueError("that profile can't be removed")
+    cfg = config()
+    cfg["profiles"] = [p for p in cfg.get("profiles") or [] if p["id"] != pid]
+    save_config(cfg)
+    shutil.rmtree(HOME / "profiles" / pid, ignore_errors=True)
+
+
+def db_path():
+    pid = profile_id()
+    return DB if pid == MAIN else HOME / "profiles" / pid / "data.db"
+
+
 def db():
-    HOME.mkdir(parents=True, exist_ok=True)
-    c = sqlite3.connect(DB)
+    path = db_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    c = sqlite3.connect(path)
     c.executescript("""
         create table if not exists store(key text primary key, fetched_at real, body text);
         create table if not exists changes(id integer primary key autoincrement, at real, kind text,
@@ -193,6 +271,12 @@ def record_changes(con, changes):
     now = time.time()
     con.executemany("insert into changes(at, kind, text) values(?,?,?)", [(now, k, t) for k, t in changes])
     con.commit()
+    if changes:
+        for h in list(HOOKS):
+            try:
+                h(list(changes), profile_id())
+            except Exception:
+                pass                                                   # a mail problem never breaks a sync
 
 
 def set_done(con, hw_id, value):
@@ -548,8 +632,25 @@ def parent_token(rotate=False):
     if not tok:
         tok = secrets.token_urlsafe(48 if long_links else 24)
         vault.set("parent-token", tok)
+        save_config({**config(), "links_created": time.time()})        # for "the link expires after N days"
     _TOK["t"] = 0.0
     return tok
+
+
+def parent_link_expiry():
+    """-> (expired, ends_at epoch or None). Setting 'links_expire_days' (0 = never) counts from when the link was made."""
+    try:
+        days = int(config().get("links_expire_days") or 0)
+    except (TypeError, ValueError):
+        days = 0
+    if days <= 0:
+        return False, None
+    created = float(config().get("links_created") or 0)
+    if not created:                                  # a link from before this setting existed: counts from now
+        created = time.time()
+        save_config({**config(), "links_created": created})
+    end = created + days * 86400
+    return time.time() > end, end
 
 
 _TOK = {"t": 0.0, "v": ""}

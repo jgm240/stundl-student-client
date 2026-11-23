@@ -34,9 +34,14 @@ def db():
         create table if not exists accounts(name text primary key, role text not null, pw text, created real, last_login real, disabled integer default 0);
         create table if not exists audit(id integer primary key autoincrement, at real, who text, event text, detail text, ip text);
     """)
-    if "prefs" not in [r[1] for r in c.execute("pragma table_info(accounts)")]:
-        c.execute("alter table accounts add column prefs text")          # per-user language / theme / accent
-        c.commit()
+    have = [r[1] for r in c.execute("pragma table_info(accounts)")]
+    for col, kind in (("prefs", "text"),            # per-user language / theme / accent
+                      ("expires", "real"),          # end of the last valid day (epoch seconds); null = never
+                      ("sections", "text"),         # this account's own list of Parent sections ("" = the role's list)
+                      ("profiles", "text")):        # the children/schools this account may see ("" = all)
+        if col not in have:
+            c.execute(f"alter table accounts add column {col} {kind}")
+            c.commit()
     try:
         os.chmod(core.HOME / "accounts.db", 0o600)
     except OSError:
@@ -102,8 +107,65 @@ def create(name, password, role, con=None, who="console"):
 
 def accounts(con=None):
     con = con or db()
-    return [dict(name=n, role=r, created=c, last_login=l, disabled=bool(d))
-            for n, r, c, l, d in con.execute("select name, role, created, last_login, disabled from accounts order by role desc, name")]
+    return [dict(name=n, role=r, created=c, last_login=l, disabled=bool(d), expires=e,
+                 sections=[x for x in (s or "").split(",") if x], profiles=[x for x in (p or "").split(",") if x])
+            for n, r, c, l, d, e, s, p in con.execute("select name, role, created, last_login, disabled, expires, sections, profiles from accounts order by role desc, name")]
+
+
+def expiry_epoch(day):
+    """'2026-12-31' -> the end of that day (local time) as epoch seconds; '' / None -> None (never)."""
+    if not day:
+        return None
+    import datetime
+    try:
+        d = datetime.date.fromisoformat(str(day).strip())
+    except ValueError:
+        raise AuthError("the end date looks like 2026-12-31")
+    return time.mktime((d + datetime.timedelta(days=1)).timetuple()) - 1
+
+
+def set_limits(name, expires=None, sections=None, profiles=None, con=None, who="console", all_sections=(), all_profiles=()):
+    """Per account: until when it works, which Parent sections it sees, which children it sees. None = leave as is."""
+    con = con or db()
+    row = con.execute("select role from accounts where name=?", (name,)).fetchone()
+    if not row:
+        raise AuthError(f"no account '{name}'")
+    if row[0] == "admin" and (expires or sections or profiles):
+        raise AuthError("administrators can't be limited (that would risk locking everybody out)")
+    parts, args = [], []
+    if expires is not None:
+        parts.append("expires=?")
+        args.append(expiry_epoch(expires))
+    if sections is not None:
+        secs = [s for s in sections if s]
+        if any(s not in all_sections for s in secs):
+            raise AuthError("sections: choose from " + ", ".join(all_sections))
+        parts.append("sections=?")
+        args.append(",".join(secs))
+    if profiles is not None:
+        ids = [p for p in profiles if p]
+        if any(p not in all_profiles for p in ids):
+            raise AuthError("unknown child/profile")
+        parts.append("profiles=?")
+        args.append(",".join(ids))
+    if parts:
+        con.execute(f"update accounts set {', '.join(parts)} where name=?", (*args, name))
+        con.commit()
+        audit(con, who, "account-limits", f"{name}: " + ", ".join(p.split("=")[0] for p in parts))
+
+
+def limits_for(name, con=None):
+    """-> {'expires': epoch|None, 'sections': [..], 'profiles': [..]} (empty lists = no limit)."""
+    con = con or db()
+    row = con.execute("select expires, sections, profiles from accounts where name=?", (name,)).fetchone()
+    if not row:
+        return {"expires": None, "sections": [], "profiles": []}
+    return {"expires": row[0], "sections": [x for x in (row[1] or "").split(",") if x], "profiles": [x for x in (row[2] or "").split(",") if x]}
+
+
+def expired(name, con=None, now=None):
+    e = limits_for(name, con)["expires"]
+    return bool(e) and (now or time.time()) > e
 
 
 def delete(name, con=None, who="console"):
@@ -223,7 +285,7 @@ def login(name, password, ip="", con=None, hours=12):
     if _blocked(keys, now):
         audit(con, name, "login-throttled", "", ip)
         raise AuthError("Too many attempts. Wait a little and try again.")
-    row = con.execute("select role, pw, disabled from accounts where name=?", (name,)).fetchone()
+    row = con.execute("select role, pw, disabled, expires from accounts where name=?", (name,)).fetchone()
     ok = bool(row) and not row[2] and check_password(password, row[1])
     if not row:
         hash_password(password)   # similar work for unknown names (no timing hint)
@@ -234,6 +296,9 @@ def login(name, password, ip="", con=None, hours=12):
         raise AuthError("Wrong name or password.")
     for k in keys:
         _FAILS.pop(k, None)
+    if row[3] and now > row[3]:                      # the password was right, so saying why is fine
+        audit(con, name, "login-expired", "", ip)
+        raise AuthError("This account has expired. Ask the administrator.")
     con.execute("update accounts set last_login=? where name=?", (now, name))
     con.commit()
     audit(con, name, "login", row[0], ip)
@@ -256,6 +321,9 @@ def session(sid):
     if not s:
         return None
     if s["exp"] < time.time():
+        SESSIONS.pop(sid, None)
+        return None
+    if not s.get("anon") and s["role"] != "admin" and expired(s["name"]):          # an expiry also ends sessions that are open
         SESSIONS.pop(sid, None)
         return None
     return s

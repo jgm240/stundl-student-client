@@ -39,7 +39,7 @@ const api=async(p,b)=>{const r=await fetch(p,b===undefined?{}:{method:"POST",hea
   if(r.status===403||r.status===401){location.href="/";throw 0}if(!r.ok){throw new Error(j.error||("HTTP "+r.status))}return j};
 const say=(t,ok=true)=>{const m=$("#msg");m.className="msg "+(ok?"ok":"err");m.textContent=t;if(ok)setTimeout(()=>m.className="msg",5000)};
 const run=async(f,okmsg)=>{try{await f();if(okmsg)say(okmsg);await show(tab)}catch(e){if(e)say(e.message,false)}};
-let S=null,C=null,tab="Overview";const TABS=["Overview","Accounts","Network","Web & links","SSH","Power","System","WebUntis","Activity"];
+let S=null,C=null,tab="Overview";const TABS=["Overview","Accounts","Children","Network","Web & links","SSH","Power","System","Notifications","WebUntis","Activity"];
 const when=t=>t?new Date(t*1000).toLocaleString("en-GB"):"never";
 async function logout(){await api("/api/logout",{});location.href="/"}
 async function show(t){tab=t;[S,C]=await Promise.all([api("/api/admin/status"),api("/api/admin/config")]);
@@ -50,7 +50,7 @@ const cfg=async(patch,msg)=>run(()=>api("/api/admin/config",patch),msg);
 const chk=(id,v)=>`<input type="checkbox" id="${id}" ${v?"checked":""}>`;
 const apply=()=>S.apply?`<div class="card"><b>Last system change:</b> ${esc(S.apply.ok?"applied":"problem")} · ${esc((S.apply.messages||[]).join("; "))}</div>`:"";
 const PAGES={
-Overview:()=>`<h1>Overview</h1><p class="sub">Everything about this server at a glance.</p>
+Overview:async()=>{const H=await api("/api/admin/health").catch(()=>({alerts:[],enabled:false}));return `<h1>Overview</h1><p class="sub">Everything about this server at a glance.</p>${alertsCard(H)}
  <div class="card"><div class="kv"><span>Web address</span><b>${S.urls.map(u=>`<a href="${esc(u)}">${esc(u)}</a>`).join("<br>")||"-"}</b></div>
  <div class="kv"><span>Hostname</span><b>${esc(S.hostname)}</b></div>
  <div class="kv"><span>WebUntis</span><b>${esc(S.untis||"not connected")}</b></div>
@@ -59,16 +59,18 @@ Overview:()=>`<h1>Overview</h1><p class="sub">Everything about this server at a 
  <div class="row"><button class="b p" onclick="run(()=>api('/api/admin/sync',{}),'Sync started')">Sync now</button></div>${apply()}
  <h2>Updates</h2><div class="card"><div class="kv"><span>Installed version</span><b>${esc(S.version)}</b></div><div id="upd" class="sub"></div>
  <div class="row"><button class="b" onclick="chkUpd()">Check for updates</button></div>
- <p class="sub">SSC Server updates itself from this project's GitHub releases when you press the button - never on its own. The previous version is kept: <code>ssconfig update --rollback</code>.</p></div>
+ <div class="row"><label style="display:inline-flex;gap:8px;align-items:center;color:var(--text)">${chk("aue",C.autoupdate.enabled)} Install new versions by itself every day at</label><input id="aut" type="time" value="${esc(C.autoupdate.time)}"><button class="b p" onclick="saveAutoUpd()">Save</button></div>
+ <p class="sub">${S.autoupdate?"Last automatic check: "+esc(S.autoupdate.day)+" - "+esc(S.autoupdate.result||""):"Updates come from this project's GitHub releases."} If a new version does not start, the old one is put back at once (and that version is not tried again). By hand: <code>ssconfig update --rollback</code>.</p></div>
  <h2>Wall-display links</h2><div class="card">${S.links.enabled?(S.links.urls.map(u=>`<div class="kv"><span>${esc(u.host)}</span><div><code>${esc(u.browser)}</code><br><code>${esc(u.wall)}</code></div></div>`).join("")||"<span class='sub'>No network address yet.</span>")
  +`<div class="row"><button class="b" onclick="if(confirm('Create a new link? Displays using the old one stop working.'))run(()=>api('/api/admin/links/rotate',{}),'New link created')">New link</button>
- <span class="sub">${S.links.long?"Long links required (64 characters).":"Standard links (32 characters)."}</span></div>`:"<span class='sub'>Link access is turned off (Web & links).</span>"}</div>`,
+ <span class="sub">${S.links.long?"Long links required (64 characters).":"Standard links (32 characters)."} ${S.links.expired?"<b style='color:var(--bad)'>The link has expired - make a new one.</b>":S.links.expires_at?"Valid until "+when(S.links.expires_at)+".":""} Shows the first child only.</span></div>`:"<span class='sub'>Link access is turned off (Web & links).</span>"}</div>`},
 Accounts:()=>`<h1>Accounts</h1><p class="sub"><b>Guest</b> and <b>user</b> accounts see the Parent view (each with its own set of sections). <b>Admins</b> get the full app and this panel.</p>
- <div class="card"><table><tr><th>Name</th><th>Role</th><th>Last sign-in</th><th></th></tr>${S.accounts.map(a=>`<tr><td>${esc(a.name)} ${a.disabled?'<span class="tag">disabled</span>':""}</td>
+ <div class="card"><table><tr><th>Name</th><th>Role</th><th>Last sign-in</th><th></th></tr>${S.accounts.map(a=>`<tr><td>${esc(a.name)} ${a.disabled?'<span class="tag">disabled</span>':""}${limTags(a)}</td>
   <td><select onchange="run(()=>api('/api/admin/accounts/role',{name:'${esc(a.name)}',role:this.value}),'Role changed')">${["guest","user","admin"].map(r=>`<option ${r===a.role?"selected":""}>${r}</option>`).join("")}</select></td>
-  <td>${when(a.last_login)}</td><td style="text-align:right;white-space:nowrap"><button class="b" onclick="newpw('${esc(a.name)}')">Password</button>
+  <td>${when(a.last_login)}</td><td style="text-align:right;white-space:nowrap"><button class="b" onclick="newpw('${esc(a.name)}')">Password</button>${a.role!=="admin"?`<button class="b" onclick="editLimits('${esc(a.name)}')">Limits</button>`:""}
   <button class="b" onclick="run(()=>api('/api/admin/accounts/disable',{name:'${esc(a.name)}',disabled:${!a.disabled}}))">${a.disabled?"Enable":"Disable"}</button>
   <button class="b d" onclick="if(confirm('Delete ${esc(a.name)}?'))run(()=>api('/api/admin/accounts/delete',{name:'${esc(a.name)}'}),'Deleted')">Delete</button></td></tr>`).join("")}</table></div>
+ ${limEditor()}
  <h2>Add an account</h2><div class="card"><div class="row"><input id="an" placeholder="name" autocomplete="off"><input id="ap" type="password" placeholder="password (min 6)" autocomplete="new-password">
   <select id="ar"><option>guest</option><option selected>user</option><option>admin</option></select><button class="b p" onclick="run(()=>api('/api/admin/accounts',{name:$('#an').value,password:$('#ap').value,role:$('#ar').value}),'Account created')">Add</button></div></div>
  <h2>What each role sees</h2><div class="card grid2">${["guest","user"].map(r=>`<div><label>${r} sections</label>${["today","timetable","homework","exams","plan","changes","grades","absences"].map(x=>`<label style="display:inline-flex;gap:6px;margin-right:10px;color:var(--text)"><input type="checkbox" data-r="${r}" value="${x}" ${C.sections[r].includes(x)?"checked":""}>${x}</label>`).join("")}</div>`).join("")}
@@ -94,12 +96,14 @@ Network:()=>`<h1>Network</h1><p class="sub">Careful: a wrong static address can 
 "Web & links":()=>`<h1>Web & links</h1><p class="sub">The web interface and the optional sign-in-free wall-display links.</p>${apply()}
  <div class="card"><div class="row"><div><label>Web port</label><input id="wp" type="number" value="${C.web.port}" style="width:100px"></div><div><label>Listen on</label><input id="wb" value="${esc(C.web.bind)}" size="14"></div>
  <div><label>Session length (hours)</label><input id="sh" type="number" value="${C.web.session_hours}" style="width:90px"></div></div>
- <div class="row"><label style="display:inline-flex;gap:8px;align-items:center;color:var(--text)">${chk("hs",C.web.https)} HTTPS (needs the certificate made by <code>ssconfig web https on</code>)</label></div>
+ <div class="row"><label style="display:inline-flex;gap:8px;align-items:center;color:var(--text)">${chk("hs",C.web.https)} HTTPS (encrypted; a certificate is made on this machine - browsers warn once)</label></div>
+ <p class="sub" style="margin:0 0 6px">After you turn HTTPS on or off the address changes to <code>https://…</code> / <code>http://…</code> on the same port. Compare the fingerprint the browser shows with the one under <b>System</b>.</p>
  <div class="row"><label style="display:inline-flex;gap:8px;align-items:center;color:var(--text)">${chk("fw",C.firewall.enabled)} Firewall on (only the web, link and SSH ports are open)</label></div>
  <div class="row"><button class="b p" onclick="saveWeb()">Save</button></div></div>
  <h2>Wall-display links</h2><div class="card"><div class="row"><label style="display:inline-flex;gap:8px;align-items:center;color:var(--text)">${chk("le",C.links.enabled)} Allow links (no sign-in)</label>
  <label style="display:inline-flex;gap:8px;align-items:center;color:var(--text)">${chk("ll",C.links.long)} Require long links (64 characters)</label>
- <div><label>Link port</label><input id="lp" type="number" value="${C.links.port}" style="width:100px"></div><button class="b p" onclick="saveLinks()">Save</button></div></div>`,
+ <div><label>Link port</label><input id="lp" type="number" value="${C.links.port}" style="width:100px"></div>
+ <div><label>Links expire after (days, 0 = never)</label><input id="lx" type="number" min="0" value="${C.links.expire_days}" style="width:120px"></div><button class="b p" onclick="saveLinks()">Save</button></div></div>`,
 SSH:()=>`<h1>SSH</h1><p class="sub">Remote console access for administrators. Changes are checked with <code>sshd -t</code> before they are used.</p>${apply()}
  <div class="card"><div class="row"><label style="display:inline-flex;gap:8px;align-items:center;color:var(--text)">${chk("se",C.ssh.enabled)} SSH enabled</label><div><label>Port</label><input id="sp" type="number" value="${C.ssh.port}" style="width:90px"></div></div>
  <div class="row"><label style="display:inline-flex;gap:8px;align-items:center;color:var(--text)">${chk("sr",C.ssh.permit_root)} Allow the root user to log in</label>
@@ -109,7 +113,7 @@ SSH:()=>`<h1>SSH</h1><p class="sub">Remote console access for administrators. Ch
  <h2>Console login</h2><div class="card"><p class="sub" style="margin-top:0">Log in on this machine's own screen and keyboard (the text console) without typing a password. <b>Console only:</b> SSH and this web panel still always ask for a password. Anyone who can touch the machine then has that Linux account (and <code>sudo</code>). Takes effect at the next boot.</p>
  <div class="row"><label style="display:inline-flex;gap:8px;align-items:center;color:var(--text)">${chk("ale",!!C.console.autologin_user)} Log in automatically as</label><input id="alu" value="${esc(C.console.autologin_user)}" size="14" placeholder="Linux user, e.g. admin">
  <button class="b p" onclick="saveAuto()">Save</button></div></div>`,
-Power:()=>`<h1>Power</h1><p class="sub">For old laptops used as servers: keep running with the lid closed.</p>${apply()}
+Power:async()=>{const i=await api("/api/admin/system");return `<h1>Power</h1><p class="sub">For old laptops used as servers: keep running with the lid closed.</p>${apply()}
  <div class="card"><div class="row"><div><label>When the lid is closed</label><select id="pl"><option value="ignore" ${C.power.lid==="ignore"?"selected":""}>Do nothing - keep running</option><option value="suspend" ${C.power.lid==="suspend"?"selected":""}>Suspend</option><option value="poweroff" ${C.power.lid==="poweroff"?"selected":""}>Power off</option></select></div></div>
  <div class="row"><label style="display:inline-flex;gap:8px;align-items:center;color:var(--text)">${chk("pb",C.power.block_sleep)} Never suspend or hibernate (also ignores the sleep keys and idle timeouts)</label></div>
  <div class="row"><button class="b p" onclick="savePower()">Save and apply</button></div>
@@ -123,7 +127,7 @@ Power:()=>`<h1>Power</h1><p class="sub">For old laptops used as servers: keep ru
  <label style="display:inline-flex;gap:8px;align-items:center;color:var(--text)">${chk("scsc",C.schedule.screen_off)} Turn the console screen off (quiet mode)</label>
  <label style="display:inline-flex;gap:8px;align-items:center;color:var(--text)">${chk("scss",C.schedule.stop_ssh)} Also stop SSH (quiet mode)</label></div>
  <div class="row"><button class="b p" onclick="saveSched()">Save and apply</button></div>
- <p class="sub">In quiet mode this web page is unreachable during the sleep period (SSH stays on unless you stop it). Suspend and power-off need a hardware clock that can wake the machine (most PCs and laptops have one; some BIOS settings must allow "wake on RTC alarm"). To end a sleep period by hand: <code>ssconfig schedule up</code>.</p></div>`,
+ <p class="sub">In quiet mode this web page is unreachable during the sleep period (SSH stays on unless you stop it). Suspend and power-off need a hardware clock that can wake the machine (most PCs and laptops have one; some BIOS settings must allow "wake on RTC alarm"). To end a sleep period by hand: <code>ssconfig schedule up</code>.</p></div>${powerExtras(i)}`},
 System:async()=>{const [i,ss]=await Promise.all([api("/api/admin/system"),api("/api/admin/sessions")]);
  const up=i.uptime_s==null?"-":(Math.floor(i.uptime_s/86400)?Math.floor(i.uptime_s/86400)+" d ":"")+Math.floor(i.uptime_s%86400/3600)+" h "+Math.floor(i.uptime_s%3600/60)+" min";
  const hot=i.temperatures.length?Math.max(...i.temperatures.map(t=>t.celsius)):null;
@@ -134,7 +138,8 @@ System:async()=>{const [i,ss]=await Promise.all([api("/api/admin/system"),api("/
   ${i.disk?tile("Disk",i.disk.percent+"%",i.disk.used_gb+" of "+i.disk.total_gb+" GB",i.disk.percent>90):""}${hot!==null?tile("Temperature",hot+" °C","hottest sensor",hot>80):""}
   ${i.battery?tile("Battery",i.battery.percent+"%",esc(i.battery.status)+(i.battery.ac_online?" · charger on":" · on battery"),!i.battery.ac_online&&i.battery.percent<30):""}</div>
  <h2>Machine</h2><div class="card"><div class="kv"><span>System</span><b>${esc(i.os)}</b></div><div class="kv"><span>Kernel</span><b>${esc(i.kernel)} (${esc(i.machine)})</b></div>
-  <div class="kv"><span>Time</span><b>${esc(i.time)} (${esc(i.timezone)})</b></div></div>
+  <div class="kv"><span>Time</span><b>${esc(i.time)} (${esc(i.timezone)})</b></div>
+   <div class="kv"><span>HTTPS</span><b>${i.tls.serving?"on":(C.web.https?"on in the settings, but not serving (see Web & links)":"off")}${i.tls.fingerprint?`<br><small style="font-weight:400;word-break:break-all">certificate ${esc(i.tls.fingerprint)}</small>`:""}</b></div></div>
  <h2>Services</h2><div class="card"><table><tr><th>Service</th><th>State</th><th></th></tr>${i.services.map(x=>`<tr><td>${esc(x.label)} <small class="sub">${esc(x.name)}</small></td><td>${state(x.state)}</td><td style="text-align:right">${x.restartable?`<button class="b" onclick="svcRestart('${esc(x.name)}')">Restart</button>`:""}</td></tr>`).join("")}</table></div>
  <h2>Power</h2><div class="card"><div class="row"><button class="b p" onclick="powerAct('reboot')">Restart the server</button><button class="b d" onclick="powerAct('poweroff')">Power off</button></div>
   <p class="sub">A restart takes about a minute; this page reloads when the server is back. After a power-off the machine has to be switched on by hand (unless a sleep schedule wakes it).</p></div>
@@ -143,25 +148,91 @@ System:async()=>{const [i,ss]=await Promise.all([api("/api/admin/system"),api("/
   <select id="ln"><option>50</option><option selected>100</option><option>300</option></select><button class="b" onclick="showLog()">Show</button></div><pre id="logbox" class="logbox">Choose a log and press Show.</pre></div>
  <h2>Backup</h2><div class="card"><div class="row"><button class="b" onclick="downloadBackup()">Download settings</button><label class="b filebtn">Restore settings from a file<input type="file" accept=".json,application/json" style="display:none" onchange="restoreBackup(this.files[0])"></label></div>
   <p class="sub">The backup holds the settings only (network, web, SSH, schedule, roles ...): no passwords, no accounts and no WebUntis key. Restoring checks everything first and applies the system parts.</p></div>`},
-WebUntis:()=>`<h1>WebUntis</h1><p class="sub">The server logs in to WebUntis by itself with the <b>Untis Mobile</b> key (no browser, no password).</p>
- <div class="card"><div class="kv"><span>Connected as</span><b>${esc(S.untis||"nobody yet")}</b></div><div class="kv"><span>Last update</span><b>${when(S.synced_at)}</b></div>
+WebUntis:()=>`<h1>WebUntis</h1>${kidPick()}<p class="sub">The server logs in to WebUntis by itself with the <b>Untis Mobile</b> key (no browser, no password).</p>
+ <div class="card"><div class="kv"><span>Connected as</span><b>${esc(kidUntis()||"nobody yet")}</b></div><div class="kv"><span>Last update</span><b>${when(S.synced_at)}</b></div>
  <div class="row"><div style="flex:1"><label>Option 1 - the Untis Mobile link: WebUntis → Profile → Freigaben / Access → Untis Mobile → scan the QR code with a phone camera and paste the text (starts with untis://setschool?…)</label>
  <input id="qr" style="width:100%" type="password" placeholder="untis://setschool?url=…" autocomplete="off"></div></div>
  <p class="sub" style="margin:6px 0">Option 2 - only have the key? Fill in the four values instead:</p>
  <div class="row"><div><label>Server</label><input id="us" placeholder="xyz.webuntis.com" autocomplete="off"></div><div><label>School login name (?school=… in the WebUntis address)</label><input id="uc" autocomplete="off"></div>
  <div><label>User name</label><input id="uu" autocomplete="off"></div><div><label>Key</label><input id="uk" type="password" autocomplete="off"></div></div>
  <div class="row"><button class="b p" onclick="saveUntis()">Save and test</button>
- <button class="b" onclick="run(()=>api('/api/admin/sync',{}),'Sync started')">Sync now</button>
- ${S.untis?`<button class="b d" onclick="if(confirm('Remove the key?'))run(()=>api('/api/admin/untis/clear',{}),'Removed')">Remove key</button>`:""}</div>
+ <button class="b" onclick="run(()=>api('/api/admin/sync',{profile:kid()}),'Sync started')">Sync now</button>
+ ${kidUntis()?`<button class="b d" onclick="if(confirm('Remove the key?'))run(()=>api('/api/admin/untis/clear',{profile:kid()}),'Removed')">Remove key</button>`:""}</div>
  <div class="row"><label style="display:inline-flex;gap:8px;align-items:center;color:var(--text)">Update every <input id="sm" type="number" value="${C.sync.minutes}" style="width:80px"> minutes</label><button class="b" onclick="cfg({sync:{minutes:+$('#sm').value}},'Saved')">Save</button></div>
  <p class="sub">The key is stored in a file only the service account can read. Treat it like a password; generating a new QR code in WebUntis revokes it.</p></div>`,
+Children:()=>`<h1>Children</h1><p class="sub">One server can follow several students or schools. Each has its own WebUntis key, its own data and its own homework ticks. Accounts see the child you allow them (<b>Accounts → Limits</b>); a switcher appears in the app when somebody may see more than one.</p>
+ <div class="card"><table><tr><th>Name</th><th>WebUntis</th><th></th></tr>${S.profiles.map(p=>`<tr><td><b>${esc(p.label)}</b> <small class="sub">${esc(p.id)}</small></td><td>${esc(p.untis||"no key yet")}</td>
+ <td style="text-align:right;white-space:nowrap"><button class="b" onclick="kidKey('${esc(p.id)}')">WebUntis key</button><button class="b" onclick="kidRename('${esc(p.id)}')">Rename</button>${p.id!=="main"?`<button class="b d" onclick="kidRemove('${esc(p.id)}')">Remove</button>`:""}</td></tr>`).join("")}</table></div>
+ <h2>Add a child</h2><div class="card"><div class="row"><div><label>Short name (letters, digits, -)</label><input id="kid" placeholder="anna" maxlength="20"></div><div><label>Shown as</label><input id="kil" placeholder="Anna" maxlength="40"></div>
+ <button class="b p" onclick="kidAdd()">Add</button></div><p class="sub">Then open <b>WebUntis</b> to enter that child's key. The wall-display (Parent) link shows the first child only.</p></div>`,
+Notifications:async()=>{const [m,h]=[await api("/api/admin/mail"),C.health];const M=C.mail,kinds={timetable:"Timetable changes (cancelled, room, substitute)",homework:"New homework",exam:"New exams",grade:"New grades"};
+ return `<h1>Notifications</h1><p class="sub">The server can e-mail what changes at school, a daily summary, and warnings about the machine itself.</p>
+ <h2>E-mail</h2><div class="card"><div class="row"><label style="display:inline-flex;gap:8px;align-items:center;color:var(--text)">${chk("me",M.enabled)} Send e-mails</label></div>
+ <div class="row"><div><label>Mail server (SMTP)</label><input id="mh" value="${esc(M.host)}" placeholder="smtp.example.com" size="26"></div><div><label>Port</label><input id="mp" type="number" value="${M.port}" style="width:90px"></div>
+ <div><label>Security</label><select id="ms"><option value="starttls" ${M.security==="starttls"?"selected":""}>STARTTLS (port 587)</option><option value="ssl" ${M.security==="ssl"?"selected":""}>SSL/TLS (port 465)</option><option value="none" ${M.security==="none"?"selected":""}>None (not recommended)</option></select></div></div>
+ <div class="row"><div><label>User name (blank = none)</label><input id="mu" value="${esc(M.user)}" autocomplete="off"></div><div><label>Password ${m.password_set?"(stored)":"(not set)"}</label><input id="mw" type="password" autocomplete="new-password" placeholder="${m.password_set?"leave empty to keep":"password"}"></div></div>
+ <div class="row"><div><label>Sender address</label><input id="mf" value="${esc(M.sender)}" placeholder="ssc@example.com" size="26"></div><div><label>Send to (comma separated)</label><input id="mt" value="${esc(M.to.join(", "))}" placeholder="parent@example.com" size="34"></div></div>
+ <div class="row">${Object.keys(kinds).map(k=>`<label style="display:inline-flex;gap:6px;align-items:center;color:var(--text)"><input type="checkbox" class="mk" value="${k}" ${M.kinds.includes(k)?"checked":""}> ${kinds[k]}</label>`).join("")}</div>
+ <div class="row"><label style="display:inline-flex;gap:8px;align-items:center;color:var(--text)">${chk("md",M.digest)} Daily summary (tomorrow's lessons, homework due, exams) at</label><input id="mdt" type="time" value="${esc(M.digest_time)}">
+ <label style="display:inline-flex;gap:8px;align-items:center;color:var(--text)">${chk("ma",M.alerts)} E-mail me when the server needs attention</label></div>
+ <div class="row"><button class="b p" onclick="saveMail()">Save</button><button class="b" onclick="mailTest()">Send a test e-mail</button></div>
+ <p class="sub">The mail password is stored on this server in a file only the service account can read (it has to be readable to log in to your mail provider) - use an app password, not your main one. The mail server's certificate is always checked. WebUntis messages are never sent. Mails go to the addresses above only.</p></div>
+ <h2>Health warnings</h2><div class="card"><div class="row"><label style="display:inline-flex;gap:8px;align-items:center;color:var(--text)">${chk("he",h.enabled)} Watch disk, temperature, battery, services and disk health</label></div>
+ <div class="row"><div><label>Disk filling up at (%)</label><input id="hw" type="number" value="${h.disk_warn}" style="width:90px"></div><div><label>Disk full at (%)</label><input id="hc" type="number" value="${h.disk_crit}" style="width:90px"></div>
+ <div><label>Too hot at (°C)</label><input id="ht" type="number" value="${h.temp_warn}" style="width:90px"></div><div><label>Battery low at (%)</label><input id="hb" type="number" value="${h.battery_warn}" style="width:90px"></div><button class="b p" onclick="saveHealth()">Save</button></div></div>`},
 Activity:async()=>{const l=await api("/api/admin/audit");return `<h1>Activity</h1><p class="sub">Sign-ins and changes (newest first).</p><div class="card"><table><tr><th>When</th><th>Who</th><th>What</th><th>From</th></tr>${l.map(e=>`<tr><td>${when(e.at)}</td><td>${esc(e.who)}</td><td>${esc(e.event)} ${esc(e.detail)}</td><td>${esc(e.ip)}</td></tr>`).join("")}</table></div>`}};
+const alertsCard=H=>!H.enabled?"":H.alerts.length?`<div class="card" style="border-color:var(--warn)"><b>Needs attention</b>${H.alerts.map(a=>`<div class="kv"><span>${a.level==="crit"?"⛔":"⚠️"}</span><b style="font-weight:500;text-align:right">${esc(a.text)}</b></div>`).join("")}</div>`:`<div class="card"><b>✅ Everything looks fine</b> <span class="sub">disk, memory, temperature, services, disks</span></div>`;
+function saveAutoUpd(){cfg({autoupdate:{enabled:$("#aue").checked,time:$("#aut").value}},"Saved")}
+const limTags=a=>[a.expires?`<span class="tag">until ${new Date(a.expires*1000).toLocaleDateString("en-GB")}${a.expires*1000<Date.now()?" - EXPIRED":""}</span>`:"",a.sections.length?`<span class="tag">${a.sections.length} sections</span>`:"",a.profiles.length?`<span class="tag">${a.profiles.length} child(ren)</span>`:""].join(" ");
+let LIM=null;
+function editLimits(n){LIM=n;show("Accounts")}
+function limEditor(){if(!LIM)return"";const a=S.accounts.find(x=>x.name===LIM);if(!a)return"";const secs=["today","timetable","homework","exams","plan","changes","grades","absences"];
+ const d=a.expires?new Date(a.expires*1000).toISOString().slice(0,10):"";
+ return `<h2>Limits for ${esc(a.name)}</h2><div class="card"><div class="row"><div><label>Account works until (blank = no end date)</label><input id="lxd" type="date" value="${d}"></div></div>
+ <label>Sections it may see (none ticked = what its role sees)</label><div class="row">${secs.map(s=>`<label style="display:inline-flex;gap:6px;align-items:center;color:var(--text)"><input type="checkbox" class="lxs" value="${s}" ${a.sections.includes(s)?"checked":""}> ${s}</label>`).join("")}</div>
+ ${S.profiles.length>1?`<label>Children it may see (none ticked = all)</label><div class="row">${S.profiles.map(p=>`<label style="display:inline-flex;gap:6px;align-items:center;color:var(--text)"><input type="checkbox" class="lxp" value="${esc(p.id)}" ${a.profiles.includes(p.id)?"checked":""}> ${esc(p.label)}</label>`).join("")}</div>`:""}
+ <div class="row"><button class="b p" onclick="saveLimits()">Save</button><button class="b" onclick="LIM=null;show('Accounts')">Cancel</button></div>
+ <p class="sub">An end date also ends sessions that are already open. A section list can only narrow what the settings give the role.</p></div>`}
+async function saveLimits(){const v=c=>[...document.querySelectorAll(c+":checked")].map(i=>i.value);
+ try{await api("/api/admin/accounts/limits",{name:LIM,expires:$("#lxd").value,sections:v(".lxs"),profiles:document.querySelector(".lxp")?v(".lxp"):undefined});LIM=null;say("Saved");show("Accounts")}catch(e){say(e.message,false)}}
+const kid=()=>$("#upr")?$("#upr").value:"main";
+const kidUntis=()=>(S.profiles.find(p=>p.id===kid())||{}).untis;
+const kidPick=()=>S.profiles.length>1?`<div class="row"><label style="display:inline-flex;gap:8px;align-items:center;color:var(--text)">Child <select id="upr" onchange="WK=this.value;show('WebUntis')">${S.profiles.map(p=>`<option value="${esc(p.id)}" ${p.id===WK?"selected":""}>${esc(p.label)}</option>`).join("")}</select></label></div>`:"";
+let WK="main";
+function kidKey(id){WK=id;show("WebUntis")}
+async function kidAdd(){try{await api("/api/admin/profiles",{action:"add",id:$("#kid").value,label:$("#kil").value});say("Added - now enter its WebUntis key");show("Children")}catch(e){say(e.message,false)}}
+async function kidRename(id){const l=prompt("New name:");if(l)try{await api("/api/admin/profiles",{action:"rename",id,label:l});show("Children")}catch(e){say(e.message,false)}}
+async function kidRemove(id){if(!confirm("Remove this child with all its data (homework ticks, plan, copies of the timetable)? This can't be undone."))return;try{await api("/api/admin/profiles",{action:"remove",id});show("Children")}catch(e){say(e.message,false)}}
+function saveMail(){const pw=$("#mw").value;cfg({mail:{enabled:$("#me").checked,host:$("#mh").value,port:+$("#mp").value,security:$("#ms").value,user:$("#mu").value,sender:$("#mf").value,to:$("#mt").value,
+ kinds:[...document.querySelectorAll(".mk:checked")].map(i=>i.value),digest:$("#md").checked,digest_time:$("#mdt").value,alerts:$("#ma").checked}},"Saved");
+ if(pw)api("/api/admin/mail/password",{password:pw}).then(()=>{$("#mw").value="";show("Notifications")}).catch(e=>say(e.message,false))}
+async function mailTest(){say("Sending…");try{await api("/api/admin/mail/test",{});say("Test e-mail sent - check the inbox.")}catch(e){say(e.message,false)}}
+function saveHealth(){cfg({health:{enabled:$("#he").checked,disk_warn:+$("#hw").value,disk_crit:+$("#hc").value,temp_warn:+$("#ht").value,battery_warn:+$("#hb").value}},"Saved")}
+function powerExtras(i){const w=i.waketest,V=w&&w.verdict?w.verdict:null,col={ok:"var(--ok)",running:"var(--muted)"}[V&&V[0]]||"var(--warn)";
+ return `<h2>Wake-up test</h2><div class="card"><p class="sub" style="margin-top:0">Does this machine wake itself from sleep? The test puts it to sleep for 2 minutes and sees whether the hardware clock wakes it. The page becomes unreachable meanwhile. Nothing is changed for good. ${i.rtc?"":"<b>No hardware clock (RTC) was found - timed wake-up is not possible here.</b>"}${i.can_suspend?"":" <b>This machine can't suspend to memory.</b>"}</p>
+ ${V?`<div class="kv"><span>Last test</span><b style="color:${col}">${esc(V[1])}</b></div>`:""}
+ <div class="row"><button class="b p" ${i.rtc&&i.can_suspend?"":"disabled"} onclick="wakeTest()">Run the wake-up test</button></div></div>
+ <h2>Power off and switch on again</h2><div class="card"><p class="sub" style="margin-top:0">Shut down now; the hardware clock switches the machine on again later. Only use this after the wake-up test worked. If it does not wake up, somebody has to press the power button.</p>
+ <div class="row"><div><label>Switch on again at (local time)</label><input id="pw1" type="time" value="06:00"></div><button class="b d" ${i.rtc?"":"disabled"} onclick="powerWake('t')">Power off, on again at that time</button>
+ <div><label>or after (minutes)</label><input id="pw2" type="number" min="1" value="60" style="width:100px"></div><button class="b d" ${i.rtc?"":"disabled"} onclick="powerWake('m')">Power off, on again after that</button></div></div>
+ <h2>Wake-on-LAN</h2><div class="card"><div class="row"><label style="display:inline-flex;gap:8px;align-items:center;color:var(--text)">${chk("wol",C.power.wol)} Let this machine be woken by a magic packet (wired network only)</label><button class="b p" onclick="cfg({power:{wol:$('#wol').checked}},'Saved - applying…')">Save</button></div>
+ <p class="sub">To switch this machine on from your phone or router: send a Wake-on-LAN packet to ${i.wol.own.length?i.wol.own.map(m=>"<code>"+esc(m.mac)+"</code> ("+esc(m.interface)+")").join(", "):"its wired network card (none found)"}. It works from sleep or power-off only if the BIOS allows it; Wi-Fi almost never supports it. This web page cannot do it itself - when the machine is off, so is the page.</p>
+ <h2 style="margin-top:14px">Machines this server can wake</h2>${i.wol.devices.length?`<table><tr><th>Name</th><th>MAC address</th><th></th></tr>${i.wol.devices.map(d=>`<tr><td>${esc(d.name)}</td><td><code>${esc(d.mac)}</code></td><td style="text-align:right"><button class="b" onclick="wolSend('${esc(d.name)}')">Wake</button><button class="b d" onclick="wolDel('${esc(d.name)}')">Remove</button></td></tr>`).join("")}</table>`:"<p class='sub'>None yet.</p>"}
+ <div class="row"><input id="wn" placeholder="name" size="14"><input id="wm" placeholder="aa:bb:cc:dd:ee:ff" size="20"><button class="b p" onclick="wolAdd()">Add</button></div></div>`}
+async function wakeTest(){if(!confirm("Put the server to sleep for 2 minutes now? This page is unreachable meanwhile. If the hardware clock can't wake it, you have to press the power button."))return;
+ try{await api("/api/admin/waketest",{});say("Going to sleep in a few seconds - reload this page in about 3 minutes.")}catch(e){say(e.message,false)}}
+async function powerWake(k){const wake=k==="t"?$("#pw1").value:$("#pw2").value;if(!wake)return say("Choose when it should switch on again.",false);
+ if(!confirm("Power off the server now? The hardware clock should switch it on again ("+(k==="t"?"at "+wake:"after "+wake+" minutes")+"). If your machine doesn't support that, press its power button."))return;
+ try{await api("/api/admin/power",{action:"poweroff_wake",wake});say("Requested - the server powers off in a few seconds.")}catch(e){say(e.message,false)}}
+async function wolSend(n){try{const j=await api("/api/admin/wol",{name:n});say("Magic packet sent to "+j.device+" ("+j.sent+" broadcast(s)).")}catch(e){say(e.message,false)}}
+async function wolAdd(){const d=[...C.wol.devices,{name:$("#wn").value,mac:$("#wm").value}];cfg({wol:{devices:d}},"Saved")}
+async function wolDel(n){cfg({wol:{devices:C.wol.devices.filter(d=>d.name!==n)}},"Removed")}
 function newpw(n){const p=prompt("New password for "+n+":");if(p)run(()=>api("/api/admin/accounts/password",{name:n,password:p}),"Password changed")}
 function saveSections(){const g=r=>[...document.querySelectorAll(`input[data-r=${r}]:checked`)].map(i=>i.value);cfg({sections:{guest:g("guest"),user:g("user")}},"Saved")}
 function saveNet(){cfg({network:{hostname:$("#hn").value,mode:$("#nm").value,interface:$("#if").value,address:$("#ad")?$("#ad").value:"",gateway:$("#gw")?$("#gw").value:"",dns:($("#dn")?$("#dn").value:"")}},"Saved - applying…")}
 function saveWifi(){run(()=>api("/api/admin/wifi",{enabled:$("#wfe").checked,ssid:$("#wfs").value,passphrase:$("#wfp").value,country:$("#wfc").value,open:$("#wfo").checked,hidden:$("#wfh").checked}),"Saved - connecting…")}
 async function saveUntis(){const qr=$("#qr").value.trim();
-  const body=qr?{qr,test:true}:{server:$("#us").value,school:$("#uc").value,user:$("#uu").value,key:$("#uk").value,test:true};
+  const body=qr?{qr,test:true,profile:kid()}:{server:$("#us").value,school:$("#uc").value,user:$("#uu").value,key:$("#uk").value,test:true,profile:kid()};
   say("Saving and testing the login…");
   try{const r=await api("/api/admin/untis",body);say(r.message||"Saved",r.tested!==false);$("#qr").value="";$("#uk").value="";setTimeout(()=>show("WebUntis"),2500)}catch(e){say(e.message,false)}}
 async function chkUpd(){const el=$("#upd");el.textContent="Checking…";
@@ -190,8 +261,8 @@ async function restoreBackup(f){if(!f)return;let j;try{j=JSON.parse(await f.text
   try{await api("/api/admin/restore",{settings:j.settings});say("Settings restored - applying…");setTimeout(()=>show("System"),1500)}catch(e){say(e.message,false)}}
 function savePower(){cfg({power:{lid:$("#pl").value,block_sleep:$("#pb").checked}},"Saved - applying…")}
 function saveAuto(){cfg({console:{autologin_user:$("#ale").checked?$("#alu").value.trim():""}},"Saved - applies at the next boot")}
-function saveWeb(){cfg({web:{port:+$("#wp").value,bind:$("#wb").value,session_hours:+$("#sh").value,https:$("#hs").checked},firewall:{enabled:$("#fw").checked}},"Saved - the service restarts")}
-function saveLinks(){cfg({links:{enabled:$("#le").checked,long:$("#ll").checked,port:+$("#lp").value}},"Saved")}
+function saveWeb(){cfg({web:{port:+$("#wp").value,bind:$("#wb").value,session_hours:+$("#sh").value,https:$("#hs").checked},firewall:{enabled:$("#fw").checked}},"Saved - the service restarts. If you changed HTTPS, open the address again with "+($("#hs").checked?"https://":"http://")+" in front.")}
+function saveLinks(){cfg({links:{enabled:$("#le").checked,long:$("#ll").checked,port:+$("#lp").value,expire_days:+$("#lx").value}},"Saved")}
 function saveSsh(){cfg({ssh:{enabled:$("#se").checked,port:+$("#sp").value,permit_root:$("#sr").checked,password_auth:$("#spw").checked,allow_users:$("#su").value}},"Saved - applying…")}
 show("Overview").catch(()=>{});
 </script></body></html>

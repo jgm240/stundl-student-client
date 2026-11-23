@@ -990,7 +990,7 @@ class PowerTests(unittest.TestCase):
                 serverconf.validate({"power": {"lid": bad}})
 
     def test_apply_writes_the_dropin_masks_sleep_and_restarts_logind(self):
-        res, seen = self.apply({"lid": "ignore", "block_sleep": True})
+        res, seen = self.apply({"lid": "ignore", "block_sleep": True, "wol": False})
         self.assertTrue(res["ok"], res)
         conf = (self.root / "etc/systemd/logind.conf.d/ssc-power.conf").read_text()
         self.assertIn("HandleLidSwitch=ignore", conf)
@@ -1013,7 +1013,7 @@ class PowerTests(unittest.TestCase):
         self.assertFalse(serverconf.load()["power"]["block_sleep"])
         self.assertEqual(ssconfig.main(["lid", "ignore"]), 0)
         self.assertEqual(ssconfig.main(["sleep", "block"]), 0)
-        self.assertEqual(serverconf.load()["power"], {"lid": "ignore", "block_sleep": True})
+        self.assertEqual(serverconf.load()["power"], {"lid": "ignore", "block_sleep": True, "wol": False})
 
 
 class ImageCommandsTests(unittest.TestCase):

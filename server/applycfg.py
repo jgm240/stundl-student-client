@@ -11,6 +11,7 @@ import time
 from pathlib import Path
 
 import serverconf
+import wake                                          # noqa: F401 (also imported where used)
 
 WPA_REL = "etc/wpa_supplicant/ssc-wifi.conf"
 
@@ -108,6 +109,8 @@ def apply_part(part, cfg, root=None, run=_run):
         elif (root / WPA_REL).exists() and not cfg["wifi"]["enabled"]:
             (root / WPA_REL).unlink()
         _write(root, "etc/network/interfaces.d/ssc", serverconf.render_network(cfg, iface, wlan))
+        if cfg["power"]["wol"] and iface != wlan:
+            run(["ethtool", "-s", iface, "wol", "g"])
         _write(root, "etc/hostname", n["hostname"] + "\n")
         hosts = root / "etc/hosts"
         try:
@@ -185,18 +188,45 @@ def apply_part(part, cfg, root=None, run=_run):
         return [("restarting" if part == "reboot" else "powering off") + " in a few seconds"]
     if part == "update":
         import updater
+        opt = str(serverconf.system_root() / "opt/ssc")
         try:
-            v = updater.install_server(root=str(serverconf.system_root() / "opt/ssc"), run=run, log=lambda m: None)
+            v = updater.install_server(root=opt, run=run, log=lambda m: None)
         except updater.UpdateError as e:
             raise RuntimeError("update: " + str(e))
-        return [f"updated to {v} (the previous version is kept for a roll-back)"]
+        if not HEALTH_CHECK(cfg):                      # the new version must answer, or the old one comes back
+            try:
+                back = updater.rollback(root=opt, run=run)
+            except updater.UpdateError as e:
+                raise RuntimeError(f"update: {v} does not start and the roll-back failed: {e}")
+            raise RuntimeError(f"update: {v} did not start properly, so the previous version ({back}) was put back")
+        return [f"updated to {v} and it is running (the previous version is kept for a roll-back)"]
+    if part == "waketest":
+        import wake
+        import schedule
+        if not schedule.has_rtc(root):
+            raise RuntimeError("wake-up test: this machine has no hardware clock (RTC) to wake it up")
+        if not wake.can_suspend(root):
+            raise RuntimeError("wake-up test: this machine can't suspend to memory - the 'quiet' sleep mode is the one for it")
+        wake.marker_path().unlink(missing_ok=True)
+        run(["systemd-run", "--no-block", "--on-active=5", "/usr/local/bin/ssconfig", "waketest-run"])
+        return [f"wake-up test: going to sleep in a few seconds, alarm in {wake.TEST_SECONDS} s"]
+    if part.startswith("poweroff-wake:"):
+        import schedule
+        if not schedule.has_rtc(root):
+            raise RuntimeError("this machine has no hardware clock (RTC) to switch it on again - plain power off only")
+        wake_at = wake_epoch(part.split(":", 1)[1])
+        run(["systemd-run", "--no-block", "--on-active=5", "rtcwake", "-m", "off", "-t", str(wake_at)])
+        return ["powering off in a few seconds; the hardware clock should switch it on at " + time.strftime("%Y-%m-%d %H:%M", time.localtime(wake_at))]
     if part == "power":
         pw = cfg["power"]
         _write(root, "etc/systemd/logind.conf.d/ssc-power.conf", serverconf.render_logind(pw))
         run(["systemctl", "mask" if pw["block_sleep"] else "unmask", *serverconf.SLEEP_TARGETS])
         run(["systemctl", "restart", "systemd-logind"])
+        if pw["wol"]:
+            for nic in _interfaces(root)[0]:
+                run(["ethtool", "-s", nic, "wol", "g"])
         what = {"ignore": "closing the lid does nothing - the machine keeps running", "suspend": "closing the lid suspends", "poweroff": "closing the lid powers off"}[pw["lid"]]
-        return [f"lid: {what}" + ("; suspend/hibernate blocked" if pw["block_sleep"] else "")]
+        return [f"lid: {what}" + ("; suspend/hibernate blocked" if pw["block_sleep"] else "") + ("; Wake-on-LAN on" if pw["wol"] else "")]
     if part == "console":
         user = cfg["console"]["autologin_user"]
         rel = "etc/systemd/system/getty@tty1.service.d/autologin.conf"
@@ -211,11 +241,52 @@ def apply_part(part, cfg, root=None, run=_run):
         run(["systemctl", "daemon-reload"])
         return [note]
     if part in ("web", "links"):
+        notes = []
+        if part == "web" and cfg["web"]["https"]:
+            import tls
+            ips = [a.split("/")[0] for _, a in serverconf.parse_ip_json(run(["ip", "-j", "-4", "addr"]).stdout)]
+            notes.append(tls.generate(cfg["network"]["hostname"], ips, run, root))
         run(["systemctl", "restart", "ssc-server"])
-        return ["web service restarted"]
+        return notes + ["web service restarted"]
     raise RuntimeError("unknown part " + part)
 
 
+HEALTH_CHECK = None                                 # set below
+
+
+def _healthy(cfg, tries=20, wait=2):
+    """Does the web service answer /health on this machine? (After an update or a restart.)"""
+    import ssl
+    import urllib.request
+    scheme = "https" if cfg["web"]["https"] else "http"
+    ctx = ssl._create_unverified_context() if scheme == "https" else None          # it is our own machine
+    for _ in range(tries):
+        try:
+            with urllib.request.urlopen(f"{scheme}://127.0.0.1:{cfg['web']['port']}/health", timeout=3, context=ctx) as r:
+                if r.status == 200:
+                    return True
+        except (OSError, ValueError):
+            pass
+        time.sleep(wait)
+    return False
+
+
+HEALTH_CHECK = _healthy
+
+
+def wake_epoch(spec, now=None):
+    """'06:00' (next time it is 06:00) or '+480' (in 480 minutes) -> epoch seconds."""
+    now = now or time.time()
+    if spec.startswith("+") and spec[1:].isdigit() and 1 <= int(spec[1:]) <= 60 * 24 * 14:
+        return int(now + int(spec[1:]) * 60)
+    if serverconf.TIME_RE.match(spec):
+        lt = time.localtime(now)
+        t = time.mktime((lt.tm_year, lt.tm_mon, lt.tm_mday, int(spec[:2]), int(spec[3:]), 0, 0, 0, -1))
+        return int(t if t > now + 120 else t + 86400)
+    raise RuntimeError("the switch-on time looks like 06:00, or +480 for minutes from now")
+
+
+POWER_WAKE_RE = re.compile(r"^poweroff-wake:(\d{2}:\d{2}|\+\d{1,5})$")
 ORDER = ("network", "firewall", "ssh", "console", "power", "schedule", "web", "links", "update")
 
 
@@ -223,12 +294,15 @@ def apply(parts, cfg=None, root=None, run=_run):
     cfg = cfg or serverconf.load()
     done, failed = [], []
     wanted = set(parts)
-    power = [p for p in ("poweroff", "reboot") if p in wanted][:1]                      # one power action at most, and always last
+    power = [p for p in ("poweroff", "reboot") if p in wanted]
+    power += sorted(p for p in wanted if POWER_WAKE_RE.match(p))
+    power = power[:1]                                                                    # one power action at most, and always last
+    tests = [p for p in ("waketest",) if p in wanted]
     restarts = sorted(p for p in wanted if p.startswith("restart:"))
     parts = [p for p in ORDER if p in wanted]
     if "links" in parts and "web" in parts:
         parts.remove("links")
-    parts += restarts + power
+    parts += restarts + (tests if not power else []) + power
     for p in parts:
         try:
             done += apply_part(p, cfg, root, run)
@@ -246,7 +320,7 @@ def process_request(root=None, run=_run):
     req = serverconf.state_dir() / "apply" / "request.json"
     try:
         import sysinfo
-        ok = lambda p: p in ORDER or p in ("reboot", "poweroff") or (p.startswith("restart:") and p[len("restart:"):] in sysinfo.RESTARTABLE)
+        ok = lambda p: p in ORDER or p in ("reboot", "poweroff", "waketest") or bool(POWER_WAKE_RE.match(p)) or (p.startswith("restart:") and p[len("restart:"):] in sysinfo.RESTARTABLE)
         parts = [p for p in json.loads(req.read_text()).get("parts", []) if isinstance(p, str) and ok(p)]
         req.unlink()
     except (OSError, ValueError):

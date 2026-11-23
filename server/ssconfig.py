@@ -10,7 +10,14 @@
                                                              ssconfig set network.mode static
   ssconfig ip <addr/len> <gateway> [dns,dns]   fixed IP address       ssconfig dhcp   automatic address
   ssconfig schedule set 22:00 06:00|disable|status   switch off at night, disks to sleep, back on in the morning
-  ssconfig system | reboot | poweroff   health of this machine; restart or power it off
+  ssconfig system | health | reboot | poweroff [--wake HH:MM]   health of this machine; restart or power it off (and switch it on again)
+  ssconfig waketest             does the hardware clock wake this machine? (suspends for 2 minutes)
+  ssconfig wol own|list|add|remove|send|on|off   Wake-on-LAN (wake other machines; let this one be woken)
+  ssconfig mail status|password|test|digest   e-mail about changes, homework, exams; daily summary; alerts
+  ssconfig profile list|add|rename|remove     several children / schools (WebUntis keys): ssconfig untis --profile ID
+  ssconfig https on|off|status  encrypted web panel (certificate made on this machine)
+  ssconfig autoupdate on [HH:MM]|off|status   install new releases by itself, with roll-back
+  ssconfig account limits NAME [--expires DATE] [--sections ..] [--children ..]
   ssconfig backup [FILE] | restore FILE    save / put back the settings
   ssconfig update [--install|--rollback]   check for / install a newer SSC from GitHub
   ssconfig lid ignore|suspend|poweroff|status   what closing a laptop lid does (ignore = keep running)
@@ -89,7 +96,7 @@ def apply_parts(parts):
 
 def changed(old, new):
     parts = [k for k in ("network", "ssh", "firewall", "web", "links", "console", "power", "schedule") if old[k] != new[k]]
-    if old["wifi"] != new["wifi"] and "network" not in parts:
+    if (old["wifi"] != new["wifi"] or old["power"]["wol"] != new["power"]["wol"]) and "network" not in parts:
         parts.append("network")
     return parts + (["firewall"] if (old["web"]["port"], old["links"]) != (new["web"]["port"], new["links"]) else [])
 
@@ -103,8 +110,8 @@ def set_setting(path, value):
     elif path in ("network.dns", "ssh.allow_users", "sections.guest", "sections.user"):
         value = [x for x in value.replace(",", " ").split() if x]
     new = serverconf.update(path, value)
+    core.save_config({**core.config(), "links_long": new["links"]["long"], "links_expire_days": new["links"]["expire_days"]})
     if new["links"]["long"] != old["links"]["long"]:
-        core.save_config({**core.config(), "links_long": new["links"]["long"]})
         core.parent_token(rotate=True)
         print("Parent link renewed - see `ssconfig showlink`.")
     fix_owner()
@@ -265,13 +272,24 @@ def cmd_schedule(args):
 
 
 def cmd_power(action, args):
-    """ssconfig reboot | poweroff   (asks first; --yes skips the question)"""
+    """ssconfig reboot | poweroff [--wake HH:MM|MINUTES]   (asks first; --yes skips; --wake: the hardware clock switches it on again)"""
     if os.geteuid() != 0:
         print("this needs root (ssconfig runs it with sudo)")
         return 1
     if "--yes" not in args and input(f"{'Restart' if action == 'reboot' else 'Power off'} this server now? [y/N] ").strip().lower() not in ("y", "yes"):
         print("Cancelled.")
         return 1
+    if action == "poweroff" and "--wake" in args:
+        spec = args[args.index("--wake") + 1] if args.index("--wake") + 1 < len(args) else ""
+        spec = "+" + spec if spec.isdigit() else spec
+        import applycfg
+        applycfg.wake_epoch(spec)                                  # validates it
+        res = applycfg.apply(["poweroff-wake:" + spec])
+        for d in res["done"]:
+            print(" ", d)
+        for f in res["failed"]:
+            print("  FAILED:", f)
+        return 0 if res["ok"] else 1
     subprocess.run(["systemctl", action])
     return 0
 
@@ -766,6 +784,194 @@ def menu_acc():
     fix_owner()
 
 
+def cmd_waketest(args, name="waketest"):
+    """ssconfig waketest   suspend for 2 minutes and see whether the hardware clock wakes the machine (waketest-run: the root part)"""
+    import wake
+    if name == "waketest-run" or args[:1] == ["run"]:
+        if os.geteuid() != 0:
+            print("this needs root")
+            return 1
+        m = wake.run_test(lambda c: subprocess.run(c, capture_output=True, text=True))
+        print(wake.verdict(m)[1])
+        return 0 if not m["rc"] else 1
+    last = wake.last_test()
+    if args[:1] == ["status"]:
+        print(last["verdict"][1] if last else "No wake-up test yet.")
+        return 0
+    print(f"The machine will go to sleep in a few seconds and should wake itself after {wake.TEST_SECONDS} s. Result: ssconfig waketest status")
+    apply_parts(["waketest"])
+    return 0
+
+
+def cmd_health(_args=None):
+    """ssconfig health   what is wrong with this machine right now"""
+    import serverapp
+    al = serverapp.collect_alerts(serverconf.load())
+    if not al:
+        print("Nothing wrong.")
+    for a in al:
+        print(f"  [{a['level']}] {a['text']}")
+    return 0
+
+
+def cmd_wol(args):
+    """ssconfig wol own | list | add NAME MAC | remove NAME | send NAME | on|off   (on/off: let this machine be woken by a magic packet)"""
+    import wake
+    sub, rest = (args[0], args[1:]) if args else ("list", [])
+    cfg = serverconf.load()
+    try:
+        if sub == "own":
+            for m in wake.own_macs(serverconf.system_root()):
+                print(f"  {m['interface']}  {m['mac']}")
+            print("Wake-on-LAN for this machine:", "on" if cfg["power"]["wol"] else "off")
+            return 0
+        if sub == "list":
+            for d in cfg["wol"]["devices"]:
+                print(f"  {d['name']}  {d['mac']}")
+            return 0
+        if sub in ("on", "off"):
+            set_setting("power.wol", "true" if sub == "on" else "false")
+            return 0
+        if sub == "add" and len(rest) == 2:
+            cfg["wol"]["devices"] = [d for d in cfg["wol"]["devices"] if d["name"] != rest[0]] + [{"name": rest[0], "mac": rest[1]}]
+            serverconf.save(cfg)
+            fix_owner()
+            return 0
+        if sub == "remove" and rest:
+            cfg["wol"]["devices"] = [d for d in cfg["wol"]["devices"] if d["name"] != rest[0]]
+            serverconf.save(cfg)
+            fix_owner()
+            return 0
+        if sub == "send" and rest:
+            dev = next((d for d in cfg["wol"]["devices"] if d["name"] == rest[0]), None)
+            if not dev:
+                print("no such device; see: ssconfig wol list")
+                return 1
+            import serverapp
+            print("Magic packet sent." if wake.send(dev["mac"], wake.broadcasts([a for _, a in serverapp.addresses()])) else "Could not send.")
+            return 0
+    except ValueError as e:
+        print("Error:", e)
+        return 1
+    print(cmd_wol.__doc__)
+    return 2
+
+
+def cmd_mail(args):
+    """ssconfig mail status | password | test | digest   (server, sender, recipients: ssconfig set mail.host ... / mail.to a@b.org,c@d.org)"""
+    import mailer
+    sub = args[0] if args else "status"
+    cfg = serverconf.load()
+    try:
+        if sub == "status":
+            m = cfg["mail"]
+            print("Mail:", "on" if m["enabled"] else "off", f"| {m['host']}:{m['port']} {m['security']} | user {m['user'] or '-'} | password {'stored' if mailer.has_password() else 'not set'}")
+            print("From:", m["sender"] or "-", "| To:", ", ".join(m["to"]) or "-", "| about:", ", ".join(m["kinds"]), "| daily summary:", f"{m['digest_time']}" if m["digest"] else "off", "| alerts:", "on" if m["alerts"] else "off")
+            return 0
+        if sub == "password":
+            pw = getpass.getpass("Mail password (not shown; empty removes it): ")
+            mailer.set_password(pw)
+            fix_owner()
+            print("Stored." if pw else "Removed.")
+            return 0
+        if sub == "test":
+            mailer.send_test(cfg)
+            print("Test mail sent.")
+            return 0
+        if sub == "digest":
+            print(f"Summary of {mailer.send_digest(cfg)} profile(s) sent.")
+            return 0
+    except (mailer.MailError, ValueError) as e:
+        print("Error:", e)
+        return 1
+    print(cmd_mail.__doc__)
+    return 2
+
+
+def cmd_profile(args):
+    """ssconfig profile list | add ID LABEL | rename ID LABEL | remove ID   (several children / schools; then: ssconfig untis --profile ID)"""
+    sub, rest = (args[0], args[1:]) if args else ("list", [])
+    try:
+        if sub == "list":
+            import untis_direct
+            for p in core.profile_list():
+                core.set_profile(p["id"])
+                print(f"  {p['id']:<12} {p['label']:<24} {untis_direct.describe() or 'no WebUntis key yet'}")
+            return 0
+        if sub == "add" and rest:
+            core.profile_add(rest[0], " ".join(rest[1:]) or rest[0])
+        elif sub == "rename" and len(rest) >= 2:
+            core.profile_rename(rest[0], " ".join(rest[1:]))
+        elif sub == "remove" and rest:
+            import untis_direct
+            core.set_profile(rest[0])
+            untis_direct.clear_credentials()
+            core.profile_remove(rest[0])
+        else:
+            print(cmd_profile.__doc__)
+            return 2
+        fix_owner()
+        return 0
+    except ValueError as e:
+        print("Error:", e)
+        return 1
+
+
+def cmd_https(args):
+    """ssconfig https on | off | status   (a certificate is made on this machine; browsers warn once - check the fingerprint)"""
+    import tls
+    sub = args[0] if args else "status"
+    if sub in ("on", "off"):
+        set_setting("web.https", "true" if sub == "on" else "false")
+        return 0
+    d = tls.describe()
+    print("HTTPS:", "on" if serverconf.load()["web"]["https"] else "off", "| certificate:", "present" if d["present"] else "not made yet")
+    if d["fingerprint"]:
+        print("Fingerprint (SHA-256):", d["fingerprint"])
+    return 0
+
+
+def cmd_autoupdate(args):
+    """ssconfig autoupdate on [HH:MM] | off | status   install new releases by itself (the old version comes back if the new one does not start)"""
+    import autoupdate
+    sub = args[0] if args else "status"
+    if sub == "on":
+        if len(args) > 1:
+            set_setting("autoupdate.time", args[1])
+        set_setting("autoupdate.enabled", "true")
+        return 0
+    if sub == "off":
+        set_setting("autoupdate.enabled", "false")
+        return 0
+    au = serverconf.load()["autoupdate"]
+    print("Automatic updates:", f"on, every day at {au['time']}" if au["enabled"] else "off")
+    last = autoupdate.last()
+    if last:
+        print("Last check:", last.get("day"), "-", last.get("result"))
+    return 0
+
+
+def cmd_limits(args):
+    """ssconfig account limits NAME [--expires YYYY-MM-DD|none] [--sections a,b|all] [--children id,id|all]"""
+    if not args:
+        print(cmd_limits.__doc__)
+        return 2
+    name, opts = args[0], args[1:]
+    kw = {}
+    try:
+        for flag, key in (("--expires", "expires"), ("--sections", "sections"), ("--children", "profiles")):
+            if flag in opts:
+                v = opts[opts.index(flag) + 1]
+                kw[key] = "" if (v in ("none", "all") and key == "expires") else ([] if v in ("none", "all") else v.split(",")) if key != "expires" else v
+        auth.set_limits(name, who="console", all_sections=serverconf.SECTIONS, all_profiles=core.profile_ids(), **kw)
+        fix_owner()
+        print("Saved.")
+        return 0
+    except (auth.AuthError, IndexError) as e:
+        print("Error:", e if isinstance(e, auth.AuthError) else cmd_limits.__doc__)
+        return 1
+
+
 def main(argv=None):
     a = list(sys.argv[1:] if argv is None else argv)
     if not a:
@@ -801,6 +1007,26 @@ def main(argv=None):
             return cmd_power(c, rest)
         if c == "system":
             return cmd_system()
+        if c in ("waketest", "waketest-run"):
+            return cmd_waketest(rest, c)
+        if c == "health":
+            return cmd_health(rest)
+        if c == "health-scan":                      # run by ssc-health.timer as root (smartctl needs it)
+            import health
+            data = health.write_scan()
+            fix_owner()
+            print(f"{len(data['disks'])} disk(s) checked")
+            return 0
+        if c == "wol":
+            return cmd_wol(rest)
+        if c == "mail":
+            return cmd_mail(rest)
+        if c == "profile":
+            return cmd_profile(rest)
+        if c == "https":
+            return cmd_https(rest)
+        if c == "autoupdate":
+            return cmd_autoupdate(rest)
         if c == "backup":
             return cmd_backup(rest)
         if c == "restore":
@@ -820,8 +1046,16 @@ def main(argv=None):
             fix_owner()
             apply_parts(changed(old, new) or ["network"])
             return 0
+        if c == "account" and rest[:1] == ["limits"]:
+            return cmd_limits(rest[1:])
         if c == "account":
             return cmd_account(rest)
+        if c in ("untis", "sync") and "--profile" in rest:
+            core.set_profile(rest[rest.index("--profile") + 1])
+            if core.profile_id() not in core.profile_ids():
+                print("no such profile; see: ssconfig profile list")
+                return 1
+            os.environ["SSC_PROFILE"] = core.profile_id()
         if c == "untis":
             return cmd_untis()
         if c == "sync":

@@ -23,14 +23,24 @@ LID_ACTIONS = ("ignore", "suspend", "poweroff")
 DAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 SCHEDULE_MODES = ("quiet", "suspend", "poweroff")
 TIME_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
+MAIL_SECURITY = ("starttls", "ssl", "none")
+MAIL_KINDS = ("timetable", "homework", "exam", "grade")
+MAC_RE = re.compile(r"^([0-9a-f]{2}:){5}[0-9a-f]{2}$")
+ADDR_RE = re.compile(r"^[^@\s<>,;()\\\"]{1,64}@[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?\.[A-Za-z]{2,}$")
+HOST_RE = re.compile(r"^[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$")
 SLEEP_TARGETS = ("sleep.target", "suspend.target", "hibernate.target", "hybrid-sleep.target")
 
 DEFAULTS = {
     "web": {"port": 8080, "bind": "0.0.0.0", "https": False, "session_hours": 12, "guest_passwordless": False},
-    "links": {"enabled": True, "long": False, "port": 8766},
+    "links": {"enabled": True, "long": False, "port": 8766, "expire_days": 0},
     "network": {"mode": "dhcp", "interface": "auto", "address": "", "gateway": "", "dns": [], "hostname": "ssc-server"},
     "console": {"autologin_user": ""},
-    "power": {"lid": "ignore", "block_sleep": True},
+    "power": {"lid": "ignore", "block_sleep": True, "wol": False},
+    "wol": {"devices": []},
+    "mail": {"enabled": False, "host": "", "port": 587, "security": "starttls", "user": "", "sender": "", "to": [],
+             "kinds": ["timetable", "homework", "exam"], "digest": False, "digest_time": "17:00", "alerts": True},
+    "health": {"enabled": True, "disk_warn": 85, "disk_crit": 95, "temp_warn": 80, "battery_warn": 15},
+    "autoupdate": {"enabled": False, "time": "04:00"},
     "schedule": {"enabled": False, "off": "22:00", "on": "06:00", "days": list(DAYS), "mode": "quiet", "spin_down_disks": True, "screen_off": True, "stop_ssh": False},
     "wifi": {"enabled": False, "ssid": "", "open": False, "hidden": False, "country": ""},
     "ssh": {"enabled": True, "port": 22, "permit_root": False, "password_auth": True, "allow_users": []},
@@ -198,7 +208,88 @@ def validate(cfg):
     if not 5 <= c["sync"]["minutes"] <= 1440:
         raise ValueError("sync interval must be 5-1440 minutes")
     c["firewall"]["enabled"] = _bool(c["firewall"]["enabled"])
+
+    try:
+        l["expire_days"] = int(l["expire_days"])
+    except (TypeError, ValueError):
+        raise ValueError("link expiry: a number of days (0 = never)")
+    if not 0 <= l["expire_days"] <= 3650:
+        raise ValueError("link expiry: 0-3650 days")
+    pw["wol"] = _bool(pw["wol"])
+
+    devs = c["wol"]["devices"]
+    if not isinstance(devs, list) or len(devs) > 20:
+        raise ValueError("at most 20 devices to wake")
+    clean = []
+    for d in devs:
+        name = re.sub(r"[\x00-\x1f<>]", "", str((d or {}).get("name", ""))).strip()[:40]
+        mac = normalize_mac((d or {}).get("mac", ""))
+        if not name:
+            raise ValueError("every device to wake needs a name")
+        clean.append({"name": name, "mac": mac})
+    c["wol"]["devices"] = clean
+
+    m = c["mail"]
+    m["enabled"], m["digest"], m["alerts"] = _bool(m["enabled"]), _bool(m["digest"]), _bool(m["alerts"])
+    m["host"] = str(m["host"]).strip()
+    m["port"] = _port(m["port"], "mail")
+    if m["security"] not in MAIL_SECURITY:
+        raise ValueError("mail security must be one of: " + ", ".join(MAIL_SECURITY))
+    m["user"] = str(m["user"]).strip()
+    if "\n" in m["user"] or "\r" in m["user"] or len(m["user"]) > 200:
+        raise ValueError("mail user name looks invalid")
+    m["sender"] = str(m["sender"]).strip()
+    to = m["to"] if isinstance(m["to"], list) else [x for x in re.split(r"[,;\s]+", str(m["to"])) if x]
+    if len(to) > 10:
+        raise ValueError("at most 10 recipients")
+    m["to"] = [x.strip() for x in to]
+    for a in m["to"] + ([m["sender"]] if m["sender"] else []):
+        if not ADDR_RE.match(a) or len(a) > 254:
+            raise ValueError(f"'{a}' is not a valid e-mail address")
+    kinds = m["kinds"] if isinstance(m["kinds"], list) else [x for x in re.split(r"[,\s]+", str(m["kinds"])) if x]
+    if any(k not in MAIL_KINDS for k in kinds):
+        raise ValueError("mail about: choose from " + ", ".join(MAIL_KINDS))
+    m["kinds"] = [k for k in MAIL_KINDS if k in kinds]
+    m["digest_time"] = str(m["digest_time"]).strip()
+    if not TIME_RE.match(m["digest_time"]):
+        raise ValueError("digest time looks like 17:00 (24-hour clock)")
+    if m["enabled"]:
+        if not m["host"] or not HOST_RE.match(m["host"]):
+            raise ValueError("mail: the mail server name is missing or invalid")
+        if not m["to"]:
+            raise ValueError("mail: add at least one recipient")
+        if not m["sender"]:
+            raise ValueError("mail: a sender address is needed")
+    elif m["host"] and not HOST_RE.match(m["host"]):
+        raise ValueError("mail: the mail server name is invalid")
+
+    h = c["health"]
+    h["enabled"] = _bool(h["enabled"])
+    for k, lo, hi in (("disk_warn", 50, 99), ("disk_crit", 51, 100), ("temp_warn", 40, 120), ("battery_warn", 1, 90)):
+        try:
+            h[k] = int(h[k])
+        except (TypeError, ValueError):
+            raise ValueError(f"health {k}: a number")
+        if not lo <= h[k] <= hi:
+            raise ValueError(f"health {k}: {lo}-{hi}")
+    if h["disk_crit"] <= h["disk_warn"]:
+        raise ValueError("the 'disk full' limit must be above the 'disk filling up' limit")
+
+    au = c["autoupdate"]
+    au["enabled"] = _bool(au["enabled"])
+    au["time"] = str(au["time"]).strip()
+    if not TIME_RE.match(au["time"]):
+        raise ValueError("update time looks like 04:00 (24-hour clock)")
     return c
+
+
+def normalize_mac(v):
+    s = re.sub(r"[-.\s]", ":", str(v).strip().lower())
+    if re.fullmatch(r"[0-9a-f]{12}", s.replace(":", "")) and ":" not in s:
+        s = ":".join(s[i:i + 2] for i in range(0, 12, 2))
+    if not MAC_RE.match(s):
+        raise ValueError(f"'{v}' is not a MAC address (like aa:bb:cc:dd:ee:ff)")
+    return s
 
 
 def merge(base, over):
@@ -343,7 +434,7 @@ def parse_iw_scan(text):
 
 
 # ------------------------------------------------------------------ rendering (fixed templates, validated input only)
-def render_interfaces(net, iface, wpa_conf=None, head=True):
+def render_interfaces(net, iface, wpa_conf=None, head=True, wol=False):
     out = "# Managed by ssconfig - changes are overwritten\n" if head else ""
     if net["mode"] == "dhcp":
         out += f"auto {iface}\niface {iface} inet dhcp\n"
@@ -356,6 +447,8 @@ def render_interfaces(net, iface, wpa_conf=None, head=True):
             out += f"    dns-nameservers {' '.join(net['dns'])}\n"
     if wpa_conf:
         out += f"    wpa-conf {wpa_conf}\n"
+    if wol:
+        out += f"    post-up ethtool -s {iface} wol g || true\n"        # wake this machine with a magic packet (wired only)
     return out
 
 
@@ -365,9 +458,9 @@ def render_network(cfg, wired, wlan=None):
     if cfg["wifi"]["enabled"] and wlan:
         out = "# Managed by ssconfig - changes are overwritten\n"
         if wired and wired != wlan:
-            out += f"allow-hotplug {wired}\niface {wired} inet dhcp\n\n"
+            out += f"allow-hotplug {wired}\niface {wired} inet dhcp\n" + (f"    post-up ethtool -s {wired} wol g || true\n" if cfg["power"]["wol"] else "") + "\n"
         return out + render_interfaces(cfg["network"], wlan, WPA_CONF_PATH, head=False)
-    return render_interfaces(cfg["network"], wired or wlan or "eth0")
+    return render_interfaces(cfg["network"], wired or wlan or "eth0", wol=cfg["power"]["wol"] and bool(wired))
 
 
 def render_logind(power):

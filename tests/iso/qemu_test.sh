@@ -102,4 +102,20 @@ if grep -qi "unpacking failed\|Kernel panic" $W/boot.log; then echo "INSTALLED B
 sleep 20
 screen_check "$W" || { echo "---- boot log (framebuffer / drm / efi lines) ----"; grep -i "fb\|drm\|efi\|framebuffer\|simple\|vga" $W/boot.log | head -40; exit 1; }
 echo "CONSOLE SHOWS TEXT OK"
+# HTTPS: turn it on through the admin API; the root helper must make a certificate and the service must come back encrypted
+curl -fsS -b $W/jar -H 'Content-Type: application/json' -d '{"web":{"https":true}}' -o /dev/null http://127.0.0.1:18080/api/admin/config
+ok=0
+for i in $(seq 1 30); do
+  if curl -ksS --max-time 5 https://127.0.0.1:18080/health 2>/dev/null | grep -q '"ok": true'; then ok=1; break; fi
+  sleep 3
+done
+if [ "$ok" != 1 ]; then echo "HTTPS DID NOT COME UP after turning it on"; exit 1; fi
+curl -ksS -b $W/jar https://127.0.0.1:18080/api/admin/system -o $W/system.json
+python3 - "$W/system.json" <<'PY'
+import json, sys
+t = json.load(open(sys.argv[1]))["tls"]
+print("tls:", t)
+sys.exit(0 if t["serving"] and t["present"] and t["fingerprint"].count(":") == 31 else 1)
+PY
+echo "HTTPS OK (certificate made on the machine, service serving TLS)"
 echo "ALL INSTALL CHECKS OK ($ARCH)"

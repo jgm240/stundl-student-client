@@ -3,7 +3,7 @@ set -e
 id ssc >/dev/null 2>&1 || useradd --system --home-dir /var/lib/ssc --shell /usr/sbin/nologin --user-group ssc
 install -d -o ssc -g ssc -m 750 /var/lib/ssc
 usermod -aG systemd-journal ssc 2>/dev/null || true      # the admin panel's log viewer
-systemctl enable ssc-server.service ssc-apply.path ssc-banner.service ssc-sync.timer ssc-schedule-boot.service ssc-live-console.service ssc-autoinstall.service nftables.service ssh.service
+systemctl enable ssc-server.service ssc-apply.path ssc-banner.service ssc-sync.timer ssc-health.timer ssc-schedule-boot.service ssc-live-console.service ssc-autoinstall.service nftables.service ssh.service
 # tty1 keeps its normal login prompt; on the live medium ssc-live-console.service takes the screen over (the getty is switched off there by a drop-in, see getty@tty1.service.d/10-ssc-live.conf)
 systemctl enable getty@tty1.service
 # Wi-Fi is started by ifupdown (wpa-conf); the standalone wpa_supplicant service would fight with it

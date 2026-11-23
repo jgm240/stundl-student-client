@@ -20,6 +20,7 @@ import ssc
 from ssc_version import VERSION
 HERE = Path(__file__).resolve().parent
 START = time.time()
+TLS = {"on": False}                  # is this process really serving HTTPS (it falls back to HTTP if there is no certificate)
 
 
 def _page(name, prefs_api=True, classic=False):
@@ -56,6 +57,41 @@ def apply_result():
         return json.loads((serverconf.state_dir() / "apply" / "result.json").read_text())
     except (OSError, ValueError):
         return None
+
+
+def allowed_profiles(s):
+    """The profile ids this session may look at (an administrator: all; a limited account: its list; the shared guest: the main one)."""
+    ids = core.profile_ids()
+    if not s or s.get("anon"):
+        return ids[:1]
+    if s["role"] == "admin":
+        return ids
+    own = auth.limits_for(s["name"])["profiles"]
+    return [p for p in ids if p in own] if own else ids
+
+
+def collect_alerts(cfg):
+    """Everything wrong with the machine right now (see health.py)."""
+    import health
+    import sysinfo
+    info = sysinfo.info(serverconf.system_root())
+    import untis_direct
+    keep = getattr(core._PROFILE, "id", None)
+    lasts, has_key = [], False
+    try:
+        for pid in core.profile_ids():
+            core.set_profile(pid)
+            if untis_direct.load_credentials():
+                has_key = True
+                lasts.append(max((t for t, _ in core.load().values()), default=0))
+    finally:
+        core._PROFILE.id = keep
+    return health.alerts(info, health.read_scan(), cfg["health"], synced_at=min(lasts) if lasts else 0, sync_minutes=cfg["sync"]["minutes"], has_key=has_key)
+
+
+def sync_core_settings(cfg):
+    """Settings the shared app code reads from config.json."""
+    core.save_config({**core.config(), "sync_mode": "direct", "links_long": cfg["links"]["long"], "links_expire_days": cfg["links"]["expire_days"]})
 
 
 def parse_who(text):
@@ -111,6 +147,8 @@ def changed_parts(old, new):
             parts.append(k)
     if old["wifi"] != new["wifi"] and "network" not in parts:
         parts.append("network")
+    if old["power"]["wol"] != new["power"]["wol"] and "network" not in parts:
+        parts.append("network")
     if old["web"]["port"] != new["web"]["port"] or old["links"] != new["links"]:
         parts.append("firewall")
     return parts
@@ -137,12 +175,20 @@ def make_handler():
         def ip(self):
             return self.client_address[0]
 
+        def enter(self, s):
+            """Point this request at the child/profile the account has chosen (and may see)."""
+            allowed = allowed_profiles(s)
+            m = re.search(r"(?:^|;\s*)ssc_profile=([a-z0-9-]{1,20})", self.headers.get("Cookie", ""))
+            want = m.group(1) if m else core.MAIN
+            core.set_profile(want if want in allowed else (allowed[0] if allowed else core.MAIN))
+            return allowed
+
         def cfg(self):
             return serverconf.load()
 
         def cookie(self, sid, cfg, clear=False):
             age = 0 if clear else cfg["web"]["session_hours"] * 3600
-            return {"Set-Cookie": f"ssc_sess={'' if clear else sid}; HttpOnly; SameSite=Strict; Path=/; Max-Age={age}" + ("; Secure" if cfg["web"]["https"] else "")}
+            return {"Set-Cookie": f"ssc_sess={'' if clear else sid}; HttpOnly; SameSite=Strict; Path=/; Max-Age={age}" + ("; Secure" if TLS["on"] else "")}
 
         def j(self, code, obj, extra=None):
             return self.send(code, json.dumps(obj), "application/json", extra)
@@ -157,6 +203,7 @@ def make_handler():
         def do_GET(self):
             u = urlparse(self.path)
             s = self.sess()
+            self.enter(s)
             if u.path == "/health":
                 return self.j(200, {"ok": True, "service": "ssc-server", "version": VERSION})
             if u.path == "/api/login-info":
@@ -178,7 +225,20 @@ def make_handler():
                     return self.j(401, {"error": "sign in first"})
                 cfg = self.cfg()
                 secs = cfg["sections"]["user" if s["role"] != "guest" else "guest"] if s["role"] != "admin" else list(serverconf.SECTIONS)
-                return self.send(200, json.dumps(core.parent_state(sections=secs)), "application/json")
+                own = [] if s.get("anon") or s["role"] == "admin" else auth.limits_for(s["name"])["sections"]
+                if own:                                            # this account's own list (never more than the settings allow for its role)
+                    secs = [x for x in secs if x in own] or secs[:1]
+                out = core.parent_state(sections=secs)
+                allowed = allowed_profiles(s)
+                labels = {p["id"]: p["label"] for p in core.profile_list()}
+                out["profile"] = core.profile_id()
+                out["profiles"] = [{"id": p, "label": labels.get(p, p)} for p in allowed]
+                return self.send(200, json.dumps(out), "application/json")
+            if u.path == "/api/profiles":
+                if not s:
+                    return self.j(401, {"error": "not signed in"})
+                labels = {p["id"]: p["label"] for p in core.profile_list()}
+                return self.j(200, {"current": core.profile_id(), "profiles": [{"id": p, "label": labels.get(p, p)} for p in allowed_profiles(s)]})
             if u.path == "/api/prefs":
                 if not s:
                     return self.j(401, {"error": "not signed in"})
@@ -198,8 +258,16 @@ def make_handler():
             return super().do_GET()
 
         def chrome(self, page, s, admin):
+            import html as _html
+            allowed = allowed_profiles(s)
+            labels = {p["id"]: p["label"] for p in core.profile_list()}
+            pick = ""
+            if len(allowed) > 1:                                     # several children: a switcher (the choice is a cookie, checked on every request)
+                opts = "".join(f"<option value='{_html.escape(p)}'{' selected' if p == core.profile_id() else ''}>{_html.escape(labels.get(p, p))}</option>" for p in allowed)
+                pick = ("<select aria-label='Child' translate='no' style='font:13px system-ui;border-radius:99px;border:0;padding:3px 8px' "
+                        "onchange=\"document.cookie='ssc_profile='+this.value+'; Path=/; SameSite=Strict';location.reload()\">" + opts + "</select>")
             bar = ("<div style='position:fixed;z-index:99;right:12px;bottom:12px;font:13px system-ui;background:rgba(20,24,38,.88);color:#fff;"
-                   "padding:7px 12px;border-radius:99px;display:flex;gap:12px;align-items:center'>"
+                   "padding:7px 12px;border-radius:99px;display:flex;gap:12px;align-items:center'>" + pick +
                    f"<span>{'Admin' if admin else s['role'].title()}: {re.sub('[<>&]', '', s['name'])}</span>"
                    + ("<a style='color:#9db4ff' href='/admin'>Admin panel</a>" if admin else "")
                    + "<a style='color:#9db4ff' href='#' onclick=\"fetch('/api/logout',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}).then(()=>location.href='/')\">Log out</a></div>")
@@ -208,6 +276,7 @@ def make_handler():
         # ---- POST
         def do_POST(self):
             u = urlparse(self.path)
+            self.enter(self.sess())
             if u.path == "/api/login":
                 return self.login()
             if u.path == "/api/update/install":
@@ -277,7 +346,16 @@ def make_handler():
                 links = {"enabled": cfg["links"]["enabled"], "long": cfg["links"]["long"],
                          "urls": serverconf.link_urls(cfg, addrs, core.parent_token()) if cfg["links"]["enabled"] else []}
                 import untis_direct
-                return self.j(200, {"version": VERSION, "uptime": int(time.time() - START), "addresses": addrs,
+                import autoupdate
+                keep = core.profile_id()
+                kids = []
+                for p in core.profile_list():
+                    core.set_profile(p["id"])
+                    kids.append({"id": p["id"], "label": p["label"], "untis": untis_direct.describe()})
+                core.set_profile(keep)
+                expired, ends = core.parent_link_expiry()
+                links["expires_at"], links["expired"] = ends, expired
+                return self.j(200, {"profiles": kids, "autoupdate": autoupdate.last(), "version": VERSION, "uptime": int(time.time() - START), "addresses": addrs,
                                     "urls": serverconf.server_urls(cfg, addrs), "hostname": cfg["network"]["hostname"], "links": links,
                                     "accounts": auth.accounts(), "untis": untis_direct.describe(), "synced_at": state["synced_at"],
                                     "apply": apply_result(), "sync": ssc.SYNC,
@@ -288,7 +366,18 @@ def make_handler():
                 return self.j(200, auth.audit_log())
             if u.path == "/api/admin/system":
                 import sysinfo
-                return self.j(200, sysinfo.info(serverconf.system_root()))
+                import schedule
+                import tls
+                import wake
+                root = serverconf.system_root()
+                return self.j(200, dict(sysinfo.info(root), tls=dict(tls.describe(root), serving=TLS["on"]), rtc=schedule.has_rtc(root), can_suspend=wake.can_suspend(root),
+                                        wol={"enabled": cfg["power"]["wol"], "own": wake.own_macs(root), "devices": cfg["wol"]["devices"]}, waketest=wake.last_test()))
+            if u.path == "/api/admin/health":
+                import health
+                return self.j(200, {"alerts": collect_alerts(cfg), "scan": health.read_scan(), "enabled": cfg["health"]["enabled"]})
+            if u.path == "/api/admin/mail":
+                import mailer
+                return self.j(200, {"password_set": mailer.has_password(), "mail": cfg["mail"]})
             if u.path == "/api/admin/logs":
                 import sysinfo
                 from urllib.parse import parse_qs
@@ -313,24 +402,91 @@ def make_handler():
             if b is None:
                 return self.j(415, {"error": "json only"})
             who = s["name"]
+            cfg_now = self.cfg
+            if b.get("profile") in core.profile_ids():           # the WebUntis key / sync of one child
+                core.set_profile(b["profile"])
             try:
                 if u.path == "/api/admin/config":
                     old = self.cfg()
                     new = serverconf.save(serverconf.merge(json.loads(json.dumps(old)), b))
                     parts = changed_parts(old, new)
+                    sync_core_settings(new)
                     if new["links"]["long"] != old["links"]["long"]:
-                        core.save_config({**core.config(), "links_long": new["links"]["long"]})
                         core.parent_token(rotate=True)       # a new, long link replaces the short one
                     if parts:
                         request_apply(parts)
                     auth.audit(auth.db(), who, "settings-changed", ",".join(parts) or "no system change", self.ip())
                     return self.j(200, {"config": new, "apply": parts})
+                if u.path == "/api/admin/waketest":
+                    import schedule
+                    import wake
+                    root = serverconf.system_root()
+                    if not schedule.has_rtc(root):
+                        raise ValueError("this machine has no hardware clock (RTC) to wake it up")
+                    if not wake.can_suspend(root):
+                        raise ValueError("this machine can't suspend to memory - use the 'quiet' sleep mode")
+                    request_apply(["waketest"])
+                    auth.audit(auth.db(), who, "wake-test", "", self.ip())
+                    return self.j(200, {"requested": "waketest", "seconds": wake.TEST_SECONDS})
+                if u.path == "/api/admin/wol":
+                    import wake
+                    dev = next((d for d in cfg_now()["wol"]["devices"] if d["name"] == str(b.get("name", ""))), None)
+                    if not dev:
+                        raise ValueError("choose one of the saved devices")
+                    sent = wake.send(dev["mac"], wake.broadcasts([a for _, a in addresses()]))
+                    auth.audit(auth.db(), who, "wake-on-lan", dev["name"], self.ip())
+                    return self.j(200, {"sent": sent, "device": dev["name"]})
+                if u.path == "/api/admin/mail/password":
+                    import mailer
+                    mailer.set_password(str(b.get("password", "")))
+                    auth.audit(auth.db(), who, "mail-password-" + ("set" if b.get("password") else "cleared"), "", self.ip())
+                    return self.j(200, {"password_set": mailer.has_password()})
+                if u.path == "/api/admin/mail/test":
+                    import mailer
+                    try:
+                        mailer.send_test(cfg_now())
+                    except mailer.MailError as e:
+                        raise ValueError(str(e))
+                    auth.audit(auth.db(), who, "mail-test", "", self.ip())
+                    return self.j(200, {"sent": True})
+                if u.path == "/api/admin/accounts/limits":
+                    auth.set_limits(str(b.get("name", "")), expires=b.get("expires"), sections=b.get("sections"), profiles=b.get("profiles"), who=who,
+                                    all_sections=serverconf.SECTIONS, all_profiles=core.profile_ids())
+                    return self.j(200, {})
+                if u.path == "/api/admin/profiles":
+                    act = str(b.get("action", ""))
+                    if act == "add":
+                        pid = core.profile_add(b.get("id"), b.get("label"))
+                    elif act == "rename":
+                        core.profile_rename(str(b.get("id", "")), b.get("label")); pid = b.get("id")
+                    elif act == "remove":
+                        pid = str(b.get("id", ""))
+                        import untis_direct
+                        core.set_profile(pid)
+                        untis_direct.clear_credentials()
+                        core.profile_remove(pid)
+                    else:
+                        raise ValueError("unknown action")
+                    auth.audit(auth.db(), who, "profile-" + act, str(pid), self.ip())
+                    return self.j(200, {"profiles": core.profile_list()})
                 if u.path in ("/api/admin/power", "/api/admin/service"):
                     import sysinfo
                     if u.path.endswith("power"):
                         action = str(b.get("action", ""))
+                        if action == "poweroff_wake":
+                            import applycfg
+                            import schedule
+                            spec = str(b.get("wake", "")).strip()
+                            spec = "+" + spec if spec.isdigit() else spec
+                            if not schedule.has_rtc(serverconf.system_root()):
+                                raise ValueError("this machine has no hardware clock (RTC) to switch it on again")
+                            applycfg.wake_epoch(spec)                      # validates the time
+                            part = "poweroff-wake:" + spec
+                            request_apply([part])
+                            auth.audit(auth.db(), who, "power-off-and-wake", spec, self.ip())
+                            return self.j(200, {"requested": part})
                         if action not in ("reboot", "poweroff"):
-                            raise ValueError("action must be reboot or poweroff")
+                            raise ValueError("action must be reboot, poweroff or poweroff_wake")
                         request_apply([action])
                         auth.audit(auth.db(), who, "power-" + action, "", self.ip())
                         return self.j(200, {"requested": action})
@@ -347,8 +503,8 @@ def make_handler():
                         raise ValueError("that is not a settings backup")
                     new = serverconf.save(serverconf.merge(json.loads(json.dumps(serverconf.DEFAULTS)), data))
                     parts = changed_parts(old, new)
+                    sync_core_settings(new)
                     if new["links"]["long"] != old["links"]["long"]:
-                        core.save_config({**core.config(), "links_long": new["links"]["long"]})
                         core.parent_token(rotate=True)
                     if parts:
                         request_apply(parts)
@@ -417,7 +573,7 @@ def make_handler():
                     import untis_direct
                     untis_direct.clear_credentials()
                 elif u.path == "/api/admin/sync":
-                    ssc.run_sync_bg()
+                    ssc.run_sync_bg(b.get("profile") if b.get("profile") in core.profile_ids() else None)
                 elif u.path == "/api/admin/links/rotate":
                     core.parent_token(rotate=True)
                     auth.audit(auth.db(), who, "link-rotated", "", self.ip())
@@ -429,34 +585,89 @@ def make_handler():
     return SH
 
 
-def _sync_loop(stop):
+def _log(msg):
+    print(msg, flush=True)
+
+
+def _stale_profiles(cfg, now):
     import untis_direct
+    keep = getattr(core._PROFILE, "id", None)
+    due = []
+    try:
+        for pid in core.profile_ids():
+            core.set_profile(pid)
+            if untis_direct.load_credentials():
+                last = max((t for t, _ in core.load().values()), default=0)
+                if now - last > cfg["sync"]["minutes"] * 60:
+                    due.append(pid)
+    finally:
+        core._PROFILE.id = keep
+    return due
+
+
+def tick(state, now=None, wall=None):
+    """One pass of the background work (every 30 s): sync, daily mail, health alerts, automatic update. `state` keeps
+    when things were last tried. Every part is on its own: one failing must not stop the others."""
+    import autoupdate
+    import mailer
+    now = now or time.time()
+    wall = wall or __import__("datetime").datetime.now()
+    cfg = serverconf.load()
+    try:
+        if not ssc.SYNC["running"] and _stale_profiles(cfg, now):
+            ssc.run_sync_bg()
+    except Exception as e:
+        _log("sync check failed: " + str(e))
+    try:
+        if mailer.digest_due(cfg, wall) and now - state.get("digest_try", 0) > 1800:
+            state["digest_try"] = now
+            mailer.send_digest(cfg, wall)
+    except Exception as e:
+        _log("daily mail failed: " + str(e))
+    try:
+        if cfg["health"]["enabled"] and now - state.get("health", 0) > 600:
+            state["health"] = now
+            fresh = __import__("health").new_alerts(collect_alerts(cfg), now)
+            if fresh:
+                _log("health: " + "; ".join(a["text"] for a in fresh))
+                mailer.send_alerts(cfg, fresh)
+    except Exception as e:
+        _log("health check failed: " + str(e))
+    try:
+        if autoupdate.due(cfg, wall):
+            import updater
+            _log("automatic update: " + autoupdate.run(cfg, updater.check, request_apply, wall))
+    except Exception as e:
+        _log("automatic update failed: " + str(e))
+
+
+def _sync_loop(stop):
+    state = {}
     while not stop.wait(30):
-        try:
-            cfg = serverconf.load()
-            last = max((t for t, _ in core.load().values()), default=0)
-            if untis_direct.load_credentials() and time.time() - last > cfg["sync"]["minutes"] * 60 and not ssc.SYNC["running"]:
-                ssc.run_sync_bg()
-        except Exception:
-            pass
+        tick(state)
 
 
 def build(cfg=None):
     cfg = cfg or serverconf.load()
     srv = ThreadingHTTPServer((cfg["web"]["bind"], cfg["web"]["port"]), make_handler())
+    TLS["on"] = False
     if cfg["web"]["https"]:
         tls = serverconf.system_root() / "etc/ssc/tls"
-        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-        ctx.minimum_version = ssl.TLSVersion.TLSv1_2
-        ctx.load_cert_chain(tls / "cert.pem", tls / "key.pem")
-        srv.socket = ctx.wrap_socket(srv.socket, server_side=True)
+        try:
+            ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+            ctx.load_cert_chain(tls / "cert.pem", tls / "key.pem")
+            srv.socket = ctx.wrap_socket(srv.socket, server_side=True)
+            TLS["on"] = True
+        except (OSError, ssl.SSLError) as e:        # no certificate yet: plain HTTP is better than no server at all (the admin can fix it)
+            print("HTTPS is on in the settings, but the certificate can't be used (" + str(e) + ") - serving plain HTTP", flush=True)
     return srv
 
 
 def run():
     os.environ.setdefault("SSC_VAULT", "file")
     cfg = serverconf.load()
-    core.save_config({**core.config(), "sync_mode": "direct", "links_long": cfg["links"]["long"]})
+    sync_core_settings(cfg)
     core.db()
     srv = build(cfg)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
@@ -469,7 +680,7 @@ def run():
             print("Parent link server not started:", e, flush=True)
     stop = threading.Event()
     threading.Thread(target=_sync_loop, args=(stop,), daemon=True).start()
-    print(f"SSC Server {VERSION} on {cfg['web']['bind']}:{cfg['web']['port']} ({'https' if cfg['web']['https'] else 'http'})", flush=True)
+    print(f"SSC Server {VERSION} on {cfg['web']['bind']}:{cfg['web']['port']} ({'https' if TLS['on'] else 'http'})", flush=True)
     try:
         while True:
             time.sleep(3600)

@@ -85,7 +85,7 @@ class SysinfoTests(unittest.TestCase):
 
     def test_info_from_a_fake_machine(self):
         root = self.fake_root()
-        out = sysinfo.info(root, run=lambda c: R(0, "active\nactive\ninactive\nactive\nactive\ninactive\ninactive\nfailed\n"))
+        out = sysinfo.info(root, run=lambda c: R(0, "active\nactive\ninactive\nactive\nactive\ninactive\ninactive\nactive\nfailed\n"))
         self.assertEqual((out["os"], out["timezone"], out["uptime_s"]), ("Debian GNU/Linux 12 (bookworm)", "Europe/Vienna", 93784.52))
         self.assertEqual(out["memory"]["percent"], 75)
         self.assertEqual(out["temperatures"], [{"name": "x86_pkg_temp", "celsius": 61.5}])

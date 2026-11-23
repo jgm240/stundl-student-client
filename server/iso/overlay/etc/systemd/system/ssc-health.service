@@ -1,0 +1,7 @@
+[Unit]
+Description=SSC Server: check the disks (SMART) for the health alerts
+
+[Service]
+Type=oneshot
+Environment=SSC_DATA_DIR=/var/lib/ssc SSC_VAULT=file
+ExecStart=/usr/bin/python3 /opt/ssc/server/ssconfig.py health-scan

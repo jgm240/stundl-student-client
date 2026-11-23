@@ -432,7 +432,23 @@ def cmd_untis(a):
         print(untis_direct.describe() or "No Untis Mobile key set.")
 
 
+def _load_server_hooks():
+    """On an SSC Server: mail about changes (a sync subprocess has nothing else that could)."""
+    try:
+        sys.path.insert(0, str(Path(__file__).resolve().parent / "server"))
+        import mailer
+        mailer.register()
+    except Exception:
+        pass
+
+
 def cmd_sync(a):
+    if not os.environ.get("SSC_PROFILE") and len(core.profile_ids()) > 1 and (getattr(a, "direct", False) or str(core.config().get("sync_mode", "")) == "direct"):
+        rc = 0                                      # several children: one sync run per profile, each with its own database and key
+        for pid in sync_profiles():
+            rc |= subprocess.call(core.self_cmd("sync", "--direct"), env={**os.environ, "SSC_PROFILE": pid})
+        return rc
+    _load_server_hooks()
     if getattr(a, "direct", False) or str(core.config().get("sync_mode", "")) == "direct":
         r = _sync_direct(a)
     else:
@@ -664,6 +680,8 @@ def make_parent_handler():
             if not m or not tok or (need_long and len(tok) < 64) or not secrets.compare_digest(m.group(1).encode(), tok):
                 _PFAILS[ip].append(now)
                 return self.reply(404, "not found")
+            if core.parent_link_expiry()[0]:
+                return self.reply(410, "This link has expired. Ask for a new one.")
             if m.group(2) == "/data.json":
                 return self.reply(200, parent_data(), "application/json")
             return self.reply(200, core.load_page(core.APPDIR / "parent.html", classic=core.ui_choice(self.headers.get("Cookie", "")) == "classic"), "text/html; charset=utf-8")
@@ -773,20 +791,42 @@ SYNC = {"running": False, "log": "", "ok": None}
 LOGIN = {"running": False, "log": "", "ok": None}
 
 
-def run_bg(state, cmd):
+def run_bg(state, cmd, env=None):
+    """cmd: one command, or a list of (command, extra environment) run one after the other (one per profile)."""
     if state["running"]:
         return
     state.update(running=True, log="", ok=None)
+    jobs = cmd if cmd and isinstance(cmd[0], tuple) else [(cmd, env or {})]
 
     def work():
-        r = subprocess.run(cmd, capture_output=True, text=True, stdin=subprocess.DEVNULL)
-        state.update(running=False, log=(r.stdout + r.stderr)[-3000:], ok=r.returncode == 0)
+        log, ok = "", True
+        for c, e in jobs:
+            r = subprocess.run(c, capture_output=True, text=True, stdin=subprocess.DEVNULL, env={**os.environ, **e})
+            log += (f"[{e['SSC_PROFILE']}] " if e.get("SSC_PROFILE") else "") + r.stdout + r.stderr
+            ok = ok and r.returncode == 0
+        state.update(running=False, log=log[-3000:], ok=ok)
     threading.Thread(target=work, daemon=True).start()
 
 
-def run_sync_bg():
+def sync_profiles(only=None):
+    """The profiles that have a WebUntis key (all of them, or just `only`)."""
+    import untis_direct
+    keep = getattr(core._PROFILE, "id", None)
+    out = []
+    try:
+        for pid in ([only] if only else core.profile_ids()):
+            core.set_profile(pid)
+            if untis_direct.load_credentials():
+                out.append(pid)
+    finally:
+        core._PROFILE.id = keep
+    return out
+
+
+def run_sync_bg(profile=None):
     if str(core.config().get("sync_mode", "")) == "direct":
-        run_bg(SYNC, core.self_cmd("sync", "--direct"))
+        jobs = [(core.self_cmd("sync", "--direct"), {"SSC_PROFILE": pid}) for pid in (sync_profiles(profile) or [core.MAIN])]
+        run_bg(SYNC, jobs)
     else:
         run_bg(SYNC, core.self_cmd("sync", "--notify", "--interactive"))
 

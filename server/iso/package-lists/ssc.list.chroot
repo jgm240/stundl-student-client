@@ -38,3 +38,6 @@ python3-pil
 python3-segno
 fonts-dejavu-core
 hdparm
+openssl
+ethtool
+smartmontools
