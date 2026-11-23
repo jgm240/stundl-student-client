@@ -215,7 +215,7 @@ class RootPartsTests(unittest.TestCase):
         morning = applycfg.wake_epoch("06:00", now)
         self.assertEqual(time.strftime("%Y-%m-%d %H:%M", time.localtime(morning)), "2026-11-23 06:00")        # the next 06:00, not the past one
         for bad in ("6am", "+0", "+99999999", "25:00", ""):
-            with self.assertRaises(RuntimeError, msg=bad):
+            with self.assertRaises(ValueError, msg=bad):
                 applycfg.wake_epoch(bad, now)
 
     def test_only_valid_parts_come_through_the_request_file(self):
@@ -796,9 +796,15 @@ class WebTests(unittest.TestCase):
             self.assertEqual(json.loads(self.reqf.read_text())["parts"], ["waketest"])
 
     def test_power_off_and_wake_validates_the_time(self):
-        for bad in ("", "tomorrow", "25:00", "6", "0", "; reboot"):
+        import schedule
+        old = schedule.has_rtc
+        schedule.has_rtc = lambda root=None: True                                          # the time itself must be checked, whatever machine runs this test
+        self.addCleanup(setattr, schedule, "has_rtc", old)
+        for bad in ("", "tomorrow", "25:00", "0", "-5", "; reboot", "99999999"):
             self.assertEqual(self.a.req("POST", "/api/admin/power", {"action": "poweroff_wake", "wake": bad})[0], 400, bad)
         self.assertFalse(self.reqf.exists())
+        self.assertEqual(self.a.req("POST", "/api/admin/power", {"action": "poweroff_wake", "wake": "90"})[0], 200)
+        self.assertEqual(json.loads(self.reqf.read_text())["parts"], ["poweroff-wake:+90"])
 
     def test_wol_only_wakes_saved_devices(self):
         self.assertEqual(self.a.req("POST", "/api/admin/wol", {"name": "pc"})[0], 400)

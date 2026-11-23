@@ -23,7 +23,7 @@ sys.path.insert(0, str(ROOT / "server"))
 import ssc_version  # noqa: E402
 import updater  # noqa: E402
 
-NEW = "1.0.0-beta.6"
+NEW = "1.0.0-beta.7"
 
 
 def make_release_tar(version=NEW, extra=None, broken=False, drop=None):
@@ -276,7 +276,7 @@ class ServerInstallTests(Base):
 
     def test_a_broken_release_changes_nothing(self):
         for label, tar in (("syntax error", make_release_tar(broken=True)), ("missing file", make_release_tar(drop="server/ssconfig.py")),
-                           ("wrong version inside", make_release_tar(version="1.0.0-beta.7"))):
+                           ("wrong version inside", make_release_tar(version="1.0.0-beta.8"))):
             FakeGitHub.tarball = tar
             root = self.make_root() if not (self.tmp / "opt" / "ssc").exists() else self.tmp / "opt" / "ssc"
             before = (root / "marker.txt").read_text()

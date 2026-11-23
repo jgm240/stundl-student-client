@@ -214,7 +214,10 @@ def apply_part(part, cfg, root=None, run=_run):
         import schedule
         if not schedule.has_rtc(root):
             raise RuntimeError("this machine has no hardware clock (RTC) to switch it on again - plain power off only")
-        wake_at = wake_epoch(part.split(":", 1)[1])
+        try:
+            wake_at = wake_epoch(part.split(":", 1)[1])
+        except ValueError as e:
+            raise RuntimeError(str(e))
         run(["systemd-run", "--no-block", "--on-active=5", "rtcwake", "-m", "off", "-t", str(wake_at)])
         return ["powering off in a few seconds; the hardware clock should switch it on at " + time.strftime("%Y-%m-%d %H:%M", time.localtime(wake_at))]
     if part == "power":
@@ -283,7 +286,7 @@ def wake_epoch(spec, now=None):
         lt = time.localtime(now)
         t = time.mktime((lt.tm_year, lt.tm_mon, lt.tm_mday, int(spec[:2]), int(spec[3:]), 0, 0, 0, -1))
         return int(t if t > now + 120 else t + 86400)
-    raise RuntimeError("the switch-on time looks like 06:00, or +480 for minutes from now")
+    raise ValueError("the switch-on time looks like 06:00, or +480 for minutes from now")
 
 
 POWER_WAKE_RE = re.compile(r"^poweroff-wake:(\d{2}:\d{2}|\+\d{1,5})$")

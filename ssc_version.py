@@ -1,7 +1,7 @@
 """The one place that knows which version of SSC this is."""
 import re
 
-VERSION = "1.0.0-beta.5"
+VERSION = "1.0.0-beta.6"
 
 _TAG = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)(?:-(alpha|beta|rc)\.(\d+))?$")
 _STAGE = {"alpha": 0, "beta": 1, "rc": 2, None: 3}          # 1.0.0-beta.9 < 1.0.0-rc.1 < 1.0.0
