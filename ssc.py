@@ -422,6 +422,15 @@ def cmd_untis(a):
             sys.exit(f"Login failed: {e}\n{untis_direct.login_hint(e)}".rstrip())
         except OSError as e:
             sys.exit(f"Can't reach {cfg['server']}: {e}")
+    elif a.action == "shape":
+        cfg = untis_direct.load_credentials() or sys.exit("No key set.")
+        try:
+            methods = [a.value] if a.value else list(untis_direct.RAW_METHODS)
+            for m in methods:
+                print(f"--- {m}")
+                print(json.dumps(untis_direct.shape(untis_direct.raw_call(cfg, m)), indent=1, ensure_ascii=False)[:12000])
+        except (ValueError, untis_direct.UntisError, OSError) as e:
+            sys.exit(f"{e}")
     elif a.action == "raw":
         cfg = untis_direct.load_credentials() or sys.exit("No key set.")
         try:
@@ -1142,7 +1151,7 @@ def main():
     x.add_argument("--time", default="06:45", help="daily sync time")
     x.add_argument("--remind-time", default="17:30", help="daily reminder time"); x.set_defaults(f=cmd_schedule)
     x = sp.add_parser("untis", help="the Untis Mobile key for headless syncing (SSC Server)")
-    x.add_argument("action", choices=["set", "test", "clear", "status", "raw"]); x.add_argument("value", nargs="?", help="the untis://setschool?... link (or, for raw: getHomeWork2017 / getExams2017 / getTimetable2017)")
+    x.add_argument("action", choices=["set", "test", "clear", "status", "raw", "shape"]); x.add_argument("value", nargs="?", help="the untis://setschool?... link (or, for raw / shape: getHomeWork2017 / getExams2017 / getTimetable2017 / getUserData2017)")
     x.add_argument("--server", help="e.g. xyz.webuntis.com"); x.add_argument("--school", help="the school's login name (?school=... in the WebUntis address)")
     x.add_argument("--user"); x.add_argument("--key", help="(better leave it out: it is then asked for without showing it)"); x.set_defaults(f=cmd_untis)
     x = sp.add_parser("plan", help="your study plan (shown in Parent mode)")

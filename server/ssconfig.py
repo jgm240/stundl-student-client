@@ -27,6 +27,7 @@
   ssconfig wifi scan|status|set <name> [--open] [--hidden] [--country=AT]|off   Wi-Fi
   ssconfig account add|list|passwd|role|disable|enable|delete ...
   ssconfig untis                set the WebUntis (Untis Mobile) key from a QR text
+  ssconfig untis test|shape [METHOD]   check the login / show the structure of WebUntis's answers (texts hidden)
   ssconfig sync                 fetch data now
   ssconfig rotate-link          make a new Parent link
   ssconfig apply [parts]        write system files (network ssh firewall web)
@@ -1107,6 +1108,9 @@ def main(argv=None):
                 print("no such profile; see: ssconfig profile list")
                 return 1
             os.environ["SSC_PROFILE"] = core.profile_id()
+        if c == "untis" and rest[:1] in (["shape"], ["raw"], ["test"]):      # what WebUntis answers (shape: with every text hidden, safe to paste)
+            args = [x for x in rest if x != "--profile" and (rest.index(x) == 0 or rest[rest.index(x) - 1] != "--profile")]
+            return subprocess.call([sys.executable, str(HERE.parent / "ssc.py"), "untis", *args])
         if c == "untis":
             return cmd_untis()
         if c == "sync":

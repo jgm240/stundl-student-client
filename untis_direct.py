@@ -184,7 +184,8 @@ def _items(refs, table, typ):
         if not name:
             continue
         item = {"current": {"type": typ, "shortName": name, "longName": cur.get("longName") or name}}
-        org = table.get(r.get("orgid")) if r.get("orgid") and r.get("orgid") != r.get("id") else None
+        oid = r.get("orgid") if r.get("orgid") is not None else r.get("orgId")
+        org = table.get(oid) if oid and oid != r.get("id") else None
         if org and (org.get("name") or org.get("longName")):
             item["removed"] = {"type": typ, "shortName": org.get("name") or org.get("longName")}
         out.append(item)
@@ -209,26 +210,64 @@ def resolve_subject(v, table):
     return str(v)
 
 
+ELEMENT_TYPES = {"kl": 1, "te": 2, "su": 3, "ro": 4}          # WebUntis element types: class, teacher, subject, room
+
+
+def _refs(p, key):
+    """The class / teacher / subject / room references of a period - either as the old fields (kl, te, su, ro) or, as the Untis Mobile
+    timetable sends them, as one list `elements` with a type number each."""
+    if p.get(key):
+        return p[key]
+    return [e for e in p.get("elements") or [] if isinstance(e, dict) and e.get("type") in (ELEMENT_TYPES[key], str(ELEMENT_TYPES[key]))]
+
+
+def _period_state(p):
+    state = str(p.get("cellState", "")).upper()
+    states = {str(e.get("state", "")).upper() for e in p.get("elements") or [] if isinstance(e, dict)}
+    if state in ("CANCEL", "CANCELLED", "CANCELED") or (not state and "CANCEL" in states):
+        return "CANCELLED"
+    if "SUBST" in state or state in ("ADDITIONAL", "ROOMSUBSTITUTION") or (not state and states & {"SUBSTITUTION", "ADDED"}):
+        return "CHANGED"
+    return "REGULAR"
+
+
 def periods_to_days(result, master, lessons=None):
     tabs = {k: _lookup(master, k) for k in ("subjects", "teachers", "rooms", "klassen")}
     days = {}
     for p in (result.get("timetable") or result).get("periods") or []:
         try:
             d = _iso(p["date"])
-            state = str(p.get("cellState", "")).upper()
-            status = "CANCELLED" if state in ("CANCEL", "CANCELLED") else ("CHANGED" if "SUBST" in state else "REGULAR")
-            if lessons is not None and (p.get("lessonId") or p.get("lid")) and p.get("su"):
-                sub = tabs["subjects"].get((p["su"][0] or {}).get("id"), {})
-                lessons.setdefault(p.get("lessonId") or p.get("lid"), sub.get("name") or sub.get("longName") or "")
+            su = _refs(p, "su")
+            lid = p.get("lessonId") or p.get("lid")
+            if lessons is not None and lid and su:
+                sub = tabs["subjects"].get((su[0] or {}).get("id"), {})
+                lessons.setdefault(lid, sub.get("name") or sub.get("longName") or "")
             days.setdefault(d, []).append({
-                "duration": {"start": f"{d}T{_hhmm(p['startTime'])}", "end": f"{d}T{_hhmm(p['endTime'])}"}, "status": status,
-                "type": "NORMAL_TEACHING_PERIOD", "lessonText": p.get("lstext") or "", "substitutionText": p.get("substText") or "",
-                "notesAll": "", "position1": _items(p.get("kl"), tabs["klassen"], "CLASS"),
-                "position2": _items(p.get("te"), tabs["teachers"], "TEACHER"), "position3": _items(p.get("su"), tabs["subjects"], "SUBJECT"),
-                "position4": _items(p.get("ro"), tabs["rooms"], "ROOM")})
+                "duration": {"start": f"{d}T{_hhmm(p['startTime'])}", "end": f"{d}T{_hhmm(p['endTime'])}"}, "status": _period_state(p),
+                "type": "NORMAL_TEACHING_PERIOD", "lessonText": p.get("lstext") or p.get("lessonText") or "", "substitutionText": p.get("substText") or "",
+                "notesAll": p.get("periodText") or p.get("periodInfo") or p.get("info") or "", "position1": _items(_refs(p, "kl"), tabs["klassen"], "CLASS"),
+                "position2": _items(_refs(p, "te"), tabs["teachers"], "TEACHER"), "position3": _items(su, tabs["subjects"], "SUBJECT"),
+                "position4": _items(_refs(p, "ro"), tabs["rooms"], "ROOM")})
         except (KeyError, ValueError, TypeError):
             continue
     return {"days": [{"date": d, "gridEntries": sorted(g, key=lambda e: e["duration"]["start"])} for d, g in sorted(days.items())]}
+
+
+def _exam_date(e):
+    """The day of an exam, whatever the field is called: examDate / date / startDate (20250120 or '2025-01-20') or the date part of a date-time."""
+    for k in ("examDate", "date", "startDate", "examDay", "day"):
+        if e.get(k) not in (None, "", 0):
+            return e[k]
+    for k in ("startDateTime", "start", "dateTime", "from"):
+        v = e.get(k)
+        if isinstance(v, str) and re.match(r"\d{4}-\d{2}-\d{2}", v):
+            return v[:10]
+    return None
+
+
+def _exam_time(v):
+    m = re.match(r"\d{4}-\d{2}-\d{2}[T ](\d{2}):(\d{2})", v) if isinstance(v, str) else None
+    return int(m.group(1) + m.group(2)) if m else None
 
 
 def fetch(cfg, today=None, weeks_back=1, weeks_ahead=4, post=None):
@@ -279,8 +318,8 @@ def fetch(cfg, today=None, weeks_back=1, weeks_ahead=4, post=None):
         r = call(cfg, "getExams2017", span, post=post)
         exams = []
         for e in r.get("exams", []):
-            exams.append({"id": e.get("id"), "examDate": e.get("examDate") or e.get("date") or e.get("startDate"),
-                          "startTime": e.get("startTime") or e.get("start"), "endTime": e.get("endTime") or e.get("end"),
+            exams.append({"id": e.get("id"), "examDate": _exam_date(e),
+                          "startTime": e.get("startTime") or e.get("start") or _exam_time(e.get("startDateTime")), "endTime": e.get("endTime") or e.get("end") or _exam_time(e.get("endDateTime")),
                           "subject": resolve_subject(e.get("subject") or e.get("subjectId") or e.get("su"), subjects) or e.get("name") or "",
                           "text": e.get("text") or e.get("name") or e.get("examType") or e.get("type") or ""})
         out["exams"] = {"data": {"exams": exams}}
@@ -291,6 +330,20 @@ def fetch(cfg, today=None, weeks_back=1, weeks_ahead=4, post=None):
     except UntisError as e:
         notes.append(f"exams: {e}")
     return out
+
+
+def shape(obj, depth=0):
+    """The structure of a WebUntis answer with every text hidden: keys, list lengths, numbers (dates, times, ids) and ALL-CAPS words like
+    STANDARD or CANCEL stay; names, texts and everything else become <text>. Safe to paste into a bug report."""
+    if isinstance(obj, dict):
+        return {k: shape(v, depth + 1) for k, v in list(obj.items())[:40]}
+    if isinstance(obj, list):
+        head = [shape(v, depth + 1) for v in obj[:2]]
+        return head + [f"... {len(obj)} items in total"] if len(obj) > 2 else head
+    if isinstance(obj, bool) or obj is None or isinstance(obj, (int, float)):
+        return obj
+    s = str(obj)
+    return s if re.fullmatch(r"[A-Z][A-Z_]{2,24}", s) else ("<text>" if s else "")
 
 
 RAW_METHODS = ("getUserData2017", "getTimetable2017", "getHomeWork2017", "getExams2017")
