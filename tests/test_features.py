@@ -360,6 +360,36 @@ class HealthTests(unittest.TestCase):
         self.assertEqual(self.ids({}, None, synced_at=0, has_key=True, now=now), {})                         # never synced is not "stale"
         self.assertEqual(self.ids({}, None, synced_at=now - 9e5, has_key=False, now=now), {})
 
+    def test_no_dns_is_the_loudest_alarm(self):
+        a = health.alerts({}, None, self.H, dns_ok=False)
+        self.assertEqual([(x["id"], x["level"]) for x in a], [("dns", "crit")])
+        self.assertIn("DNS", a[0]["text"])
+        self.assertEqual(health.alerts({}, None, self.H, dns_ok=True), [])
+        self.assertEqual(health.alerts({}, None, self.H, dns_ok=None), [])
+
+    def test_a_key_but_never_any_data_is_reported(self):
+        up = {"uptime_s": 7200}
+        self.assertEqual({a["id"] for a in health.alerts(up, None, self.H, synced_at=0, has_key=True)}, {"nosync"})
+        self.assertEqual(health.alerts({"uptime_s": 600}, None, self.H, synced_at=0, has_key=True), [])          # just booted: give it time
+        self.assertEqual(health.alerts(up, None, self.H, synced_at=0, has_key=False), [])
+        self.assertEqual(health.alerts(up, None, self.H, synced_at=time.time() - 60, has_key=True), [])
+
+    def test_dns_check(self):
+        health._DNS.update(t=0.0, ok=None)
+        calls = []
+        self.assertTrue(health.dns_ok(resolve=lambda h, p: calls.append(h) or [1], now=lambda: 1000.0))
+        self.assertTrue(health.dns_ok(resolve=lambda h, p: 1 / 0, now=lambda: 1100.0))                           # cached for 5 minutes
+        self.assertEqual(calls, ["github.com"])
+
+        def broken(h, p):
+            raise OSError("Temporary failure in name resolution")
+        self.assertFalse(health.dns_ok(resolve=broken, now=lambda: 2000.0))
+        import threading
+        stuck = threading.Event()
+        self.assertFalse(health.dns_ok(resolve=lambda h, p: stuck.wait(30), now=lambda: 3000.0))                  # a resolver that hangs counts as broken
+        stuck.set()
+        health._DNS.update(t=0.0, ok=None)
+
     def test_off_means_off(self):
         self.assertEqual(health.alerts({"disk": {"percent": 99, "used_gb": 1, "total_gb": 1}}, None, dict(self.H, enabled=False)), [])
 

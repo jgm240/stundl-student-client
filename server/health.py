@@ -4,7 +4,9 @@ The checks are pure functions over what sysinfo.info() reports plus a SMART scan
 (smartctl needs root). Alerts have stable ids so the mail goes out once when something starts, not every hour."""
 import json
 import re
+import socket
 import subprocess
+import threading
 import time
 
 import serverconf
@@ -61,7 +63,28 @@ def read_scan():
         return None
 
 
-def alerts(info, scan_data, h, synced_at=0, sync_minutes=30, has_key=False, now=None):
+_DNS = {"t": 0.0, "ok": None}
+
+
+def dns_ok(host="github.com", resolve=socket.getaddrinfo, now=time.time, cache=300):
+    """Can this machine turn a name into an address? Without it nothing works: no WebUntis data, no updates, no mail. Cached for 5 minutes."""
+    if _DNS["ok"] is not None and now() - _DNS["t"] < cache:
+        return _DNS["ok"]
+    res = {"ok": False}
+
+    def work():
+        try:
+            res["ok"] = bool(resolve(host, 443))
+        except (OSError, UnicodeError):
+            res["ok"] = False
+    th = threading.Thread(target=work, daemon=True)
+    th.start()
+    th.join(4)                                     # a resolver that hangs counts as broken
+    _DNS.update(t=now(), ok=res["ok"])
+    return res["ok"]
+
+
+def alerts(info, scan_data, h, synced_at=0, sync_minutes=30, has_key=False, now=None, dns_ok=None):
     """-> [{'id','level','text'}] (level 'warn' or 'crit'). `h` = the health section of the settings."""
     now = now or time.time()
     out = []
@@ -92,6 +115,12 @@ def alerts(info, scan_data, h, synced_at=0, sync_minutes=30, has_key=False, now=
     for dk in (scan_data or {}).get("disks") or []:
         if dk["ok"] is False:
             out.append({"id": "smart:" + dk["dev"], "level": "crit", "text": f"The disk {dk['dev']} {dk['model']} reports that it is failing (SMART). Back up and replace it."})
+    if dns_ok is False:
+        out.append({"id": "dns", "level": "crit", "text": "This server can't look up names (DNS), so it cannot reach WebUntis, GitHub or the mail server - "
+                                                          "no timetable, homework or updates will arrive. Check Network → DNS servers (with a fixed IP address) or the router."})
+    uptime = (info or {}).get("uptime_s")
+    if has_key and not synced_at and uptime and uptime > 3600:
+        out.append({"id": "nosync", "level": "warn", "text": "A WebUntis key is set, but no data has ever been fetched. See WebUntis → Sync now for the reason."})
     if has_key and synced_at and now - synced_at > max(3 * sync_minutes * 60, 3 * 3600):
         out.append({"id": "stale", "level": "warn", "text": "No new school data for a long time: the WebUntis key may have stopped working, or the server has no internet."})
     return out

@@ -141,7 +141,8 @@ def collect_alerts(cfg):
                 lasts.append(max((t for t, _ in core.load().values()), default=0))
     finally:
         core._PROFILE.id = keep
-    return health.alerts(info, health.read_scan(), cfg["health"], synced_at=min(lasts) if lasts else 0, sync_minutes=cfg["sync"]["minutes"], has_key=has_key)
+    return health.alerts(info, health.read_scan(), cfg["health"], synced_at=min(lasts) if lasts else 0, sync_minutes=cfg["sync"]["minutes"], has_key=has_key,
+                         dns_ok=health.dns_ok() if (has_key or cfg["autoupdate"]["enabled"] or cfg["mail"]["enabled"]) else None)
 
 
 def sync_core_settings(cfg):

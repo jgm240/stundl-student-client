@@ -55,6 +55,7 @@ Overview:async()=>{const H=await api("/api/admin/health").catch(()=>({alerts:[],
  <div class="kv"><span>Hostname</span><b>${esc(S.hostname)}</b></div>
  <div class="kv"><span>WebUntis</span><b>${esc(S.untis||"not connected")}</b></div>
  <div class="kv"><span>Last data update</span><b>${when(S.synced_at)}</b></div>
+ ${syncRow()}
  <div class="kv"><span>Accounts</span><b>${S.accounts.length} (${S.accounts.filter(a=>a.role==="admin").length} admin)</b></div></div>
  <div class="row"><button class="b p" onclick="run(()=>api('/api/admin/sync',{}),'Sync started')">Sync now</button></div>${apply()}
  <h2>Updates</h2><div class="card"><div class="kv"><span>Installed version</span><b>${esc(S.version)}</b></div><div id="upd" class="sub"></div>
@@ -150,7 +151,7 @@ System:async()=>{const [i,ss]=await Promise.all([api("/api/admin/system"),api("/
  <h2>Backup</h2><div class="card"><div class="row"><button class="b" onclick="downloadBackup()">Download settings</button><label class="b filebtn">Restore settings from a file<input type="file" accept=".json,application/json" style="display:none" onchange="restoreBackup(this.files[0])"></label></div>
   <p class="sub">The backup holds the settings only (network, web, SSH, schedule, roles ...): no passwords, no accounts and no WebUntis key. Restoring checks everything first and applies the system parts.</p></div>`},
 WebUntis:()=>`<h1>WebUntis</h1>${kidPick()}<p class="sub">The server logs in to WebUntis by itself with the <b>Untis Mobile</b> key (no browser, no password).</p>
- <div class="card"><div class="kv"><span>Connected as</span><b>${esc(kidUntis()||"nobody yet")}</b></div><div class="kv"><span>Last update</span><b>${when(S.synced_at)}</b></div>
+ <div class="card"><div class="kv"><span>Connected as</span><b>${esc(kidUntis()||"nobody yet")}</b></div><div class="kv"><span>Last update</span><b>${when(S.synced_at)}</b></div>${syncRow()}
  <div class="row"><div style="flex:1"><label>Option 1 - the Untis Mobile link: WebUntis → Profile → Freigaben / Access → Untis Mobile → scan the QR code with a phone camera and paste the text (starts with untis://setschool?…)</label>
  <input id="qr" style="width:100%" type="password" placeholder="untis://setschool?url=…" autocomplete="off"></div></div>
  <p class="sub" style="margin:6px 0">Option 2 - only have the key? Fill in the four values instead:</p>
@@ -191,6 +192,8 @@ Notifications:async()=>{const [m,h]=[await api("/api/admin/mail"),C.health];cons
  <div class="row"><div><label>Disk filling up at (%)</label><input id="hw" type="number" value="${h.disk_warn}" style="width:90px"></div><div><label>Disk full at (%)</label><input id="hc" type="number" value="${h.disk_crit}" style="width:90px"></div>
  <div><label>Too hot at (°C)</label><input id="ht" type="number" value="${h.temp_warn}" style="width:90px"></div><div><label>Battery low at (%)</label><input id="hb" type="number" value="${h.battery_warn}" style="width:90px"></div><button class="b p" onclick="saveHealth()">Save</button></div></div>`},
 Activity:async()=>{const l=await api("/api/admin/audit");return `<h1>Activity</h1><p class="sub">Sign-ins and changes (newest first).</p><div class="card"><table><tr><th>When</th><th>Who</th><th>What</th><th>From</th></tr>${l.map(e=>`<tr><td>${when(e.at)}</td><td>${esc(e.who)}</td><td>${esc(e.event)} ${esc(e.detail)}</td><td>${esc(e.ip)}</td></tr>`).join("")}</table></div>`}};
+const syncRow=()=>{const y=S.sync||{};if(y.running)return `<div class="kv"><span>Last sync</span><b>running…</b></div>`;if(y.ok===null||y.ok===undefined)return `<div class="kv"><span>Last sync</span><b>not run since the server started</b></div>`;
+ return `<div class="kv"><span>Last sync</span><b style="color:${y.ok?"var(--ok)":"var(--bad)"}">${y.ok?"worked":"FAILED"}</b></div>${y.log?`<pre class="logbox" style="max-height:200px;overflow:auto">${esc(y.log)}</pre>`:""}`};
 const alertsCard=H=>!H.enabled?"":H.alerts.length?`<div class="card" style="border-color:var(--warn)"><b>Needs attention</b>${H.alerts.map(a=>`<div class="kv"><span>${a.level==="crit"?"⛔":"⚠️"}</span><b style="font-weight:500;text-align:right">${esc(a.text)}</b></div>`).join("")}</div>`:`<div class="card"><b>✅ Everything looks fine</b> <span class="sub">disk, memory, temperature, services, disks</span></div>`;
 function saveAutoUpd(){cfg({autoupdate:{enabled:$("#aue").checked,time:$("#aut").value}},"Saved")}
 const limTags=a=>[a.expires?`<span class="tag">until ${new Date(a.expires*1000).toLocaleDateString("en-GB")}${a.expires*1000<Date.now()?" - EXPIRED":""}</span>`:"",a.sections.length?`<span class="tag">${a.sections.length} sections</span>`:"",a.profiles.length?`<span class="tag">${a.profiles.length} child(ren)</span>`:""].join(" ");
