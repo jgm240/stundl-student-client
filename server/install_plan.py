@@ -122,7 +122,7 @@ def validate_answers(a, disks):
     for name, role, pw in a.get("accounts") or []:
         name = str(name).strip().lower()
         try:
-            if role not in auth.ROLES:
+            if role not in auth.BASE_ROLES:
                 raise auth.AuthError("role must be guest, user or admin")
             auth._check_name(name)
             auth._check_password(role, pw)

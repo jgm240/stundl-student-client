@@ -39,7 +39,7 @@ const api=async(p,b)=>{const r=await fetch(p,b===undefined?{}:{method:"POST",hea
   if(r.status===403||r.status===401){location.href="/";throw 0}if(!r.ok){throw new Error(j.error||("HTTP "+r.status))}return j};
 const say=(t,ok=true)=>{const m=$("#msg");m.className="msg "+(ok?"ok":"err");m.textContent=t;if(ok)setTimeout(()=>m.className="msg",5000)};
 const run=async(f,okmsg)=>{try{await f();if(okmsg)say(okmsg);await show(tab)}catch(e){if(e)say(e.message,false)}};
-let S=null,C=null,tab="Overview";const TABS=["Overview","Accounts","Children","Network","Web & links","SSH","Power","System","Notifications","WebUntis","Activity"];
+let S=null,C=null,tab="Overview";const TABS=["Overview","Accounts","Children","Spaces","Network","Web & links","SSH","Power","System","Notifications","WebUntis","Activity"];
 const when=t=>t?new Date(t*1000).toLocaleString("en-GB"):"never";
 async function logout(){await api("/api/logout",{});location.href="/"}
 async function show(t){tab=t;[S,C]=await Promise.all([api("/api/admin/status"),api("/api/admin/config")]);
@@ -66,9 +66,9 @@ Overview:async()=>{const H=await api("/api/admin/health").catch(()=>({alerts:[],
  +`<div class="row"><button class="b" onclick="if(confirm('Create a new link? Displays using the old one stop working.'))run(()=>api('/api/admin/links/rotate',{}),'New link created')">New link</button>
  <span class="sub">${S.links.long?"Long links required (64 characters).":"Standard links (32 characters)."} ${S.links.expired?"<b style='color:var(--bad)'>The link has expired - make a new one.</b>":S.links.expires_at?"Valid until "+when(S.links.expires_at)+".":""} Shows the first child only.</span></div>`:"<span class='sub'>Link access is turned off (Web & links).</span>"}</div>`},
 Accounts:()=>`<h1>Accounts</h1><p class="sub"><b>Guest</b> and <b>user</b> accounts see the Parent view (each with its own set of sections). <b>Admins</b> get the full app and this panel.</p>
- <div class="card"><table><tr><th>Name</th><th>Role</th><th>Last sign-in</th><th></th></tr>${S.accounts.map(a=>`<tr><td>${esc(a.name)} ${a.disabled?'<span class="tag">disabled</span>':""}${limTags(a)}</td>
-  <td><select onchange="run(()=>api('/api/admin/accounts/role',{name:'${esc(a.name)}',role:this.value}),'Role changed')">${["guest","user","admin"].map(r=>`<option ${r===a.role?"selected":""}>${r}</option>`).join("")}</select></td>
-  <td>${when(a.last_login)}</td><td style="text-align:right;white-space:nowrap"><button class="b" onclick="newpw('${esc(a.name)}')">Password</button>${a.role!=="admin"?`<button class="b" onclick="editLimits('${esc(a.name)}')">Limits</button>`:""}
+ <div class="card"><table><tr><th>Name</th><th>Role</th><th>Last sign-in</th><th></th></tr>${S.accounts.map(a=>`<tr><td>${esc(a.name)} ${a.disabled?'<span class="tag">disabled</span>':""}${a.space?` <span class="tag" title="space">${esc(spLabel(a.space))}</span>`:""}${limTags(a)}</td>
+  <td><select onchange="run(()=>api('/api/admin/accounts/role',{name:'${esc(a.name)}',role:this.value}),'Role changed')">${["guest","user","admin","student"].map(r=>`<option ${r===a.role?"selected":""}>${r}</option>`).join("")}</select></td>
+  <td>${when(a.last_login)}</td><td style="text-align:right;white-space:nowrap"><button class="b" onclick="newpw('${esc(a.name)}')">Password</button>${a.role!=="admin"||a.space?`<button class="b" onclick="editLimits('${esc(a.name)}')">Limits</button>`:""}<button class="b" onclick="moveAcc('${esc(a.name)}')">Space…</button>
   <button class="b" onclick="run(()=>api('/api/admin/accounts/disable',{name:'${esc(a.name)}',disabled:${!a.disabled}}))">${a.disabled?"Enable":"Disable"}</button>
   <button class="b d" onclick="if(confirm('Delete ${esc(a.name)}?'))run(()=>api('/api/admin/accounts/delete',{name:'${esc(a.name)}'}),'Deleted')">Delete</button></td></tr>`).join("")}</table></div>
  ${limEditor()}
@@ -162,10 +162,19 @@ WebUntis:()=>`<h1>WebUntis</h1>${kidPick()}<p class="sub">The server logs in to 
  <div class="row"><label style="display:inline-flex;gap:8px;align-items:center;color:var(--text)">Update every <input id="sm" type="number" value="${C.sync.minutes}" style="width:80px"> minutes</label><button class="b" onclick="cfg({sync:{minutes:+$('#sm').value}},'Saved')">Save</button></div>
  <p class="sub">The key is stored in a file only the service account can read. Treat it like a password; generating a new QR code in WebUntis revokes it.</p></div>`,
 Children:()=>`<h1>Children</h1><p class="sub">One server can follow several students or schools. Each has its own WebUntis key, its own data and its own homework ticks. Accounts see the child you allow them (<b>Accounts → Limits</b>); a switcher appears in the app when somebody may see more than one.</p>
- <div class="card"><table><tr><th>Name</th><th>WebUntis</th><th></th></tr>${S.profiles.map(p=>`<tr><td><b>${esc(p.label)}</b> <small class="sub">${esc(p.id)}</small></td><td>${esc(p.untis||"no key yet")}</td>
- <td style="text-align:right;white-space:nowrap"><button class="b" onclick="kidKey('${esc(p.id)}')">WebUntis key</button><button class="b" onclick="kidRename('${esc(p.id)}')">Rename</button>${p.id!=="main"?`<button class="b d" onclick="kidRemove('${esc(p.id)}')">Remove</button>`:""}</td></tr>`).join("")}</table></div>
+ <div class="card"><table><tr><th>Name</th><th>Space</th><th>WebUntis</th><th></th></tr>${S.profiles.map(p=>`<tr><td><b>${esc(p.label)}</b> <small class="sub">${esc(p.id)}</small></td><td>${p.space?esc(spLabel(p.space)):"<span class='sub'>none</span>"}</td><td>${esc(p.untis||"no key yet")}</td>
+ <td style="text-align:right;white-space:nowrap"><button class="b" onclick="kidKey('${esc(p.id)}')">WebUntis key</button><button class="b" onclick="kidRename('${esc(p.id)}')">Rename</button><button class="b" onclick="kidSpace('${esc(p.id)}')">Space…</button>${p.id!=="main"?`<button class="b d" onclick="kidRemove('${esc(p.id)}')">Remove</button>`:""}</td></tr>`).join("")}</table></div>
  <h2>Add a child</h2><div class="card"><div class="row"><div><label>Short name (letters, digits, -)</label><input id="kid" placeholder="anna" maxlength="20"></div><div><label>Shown as</label><input id="kil" placeholder="Anna" maxlength="40"></div>
  <button class="b p" onclick="kidAdd()">Add</button></div><p class="sub">Then open <b>WebUntis</b> to enter that child's key. The wall-display (Parent) link shows the first child only.</p></div>`,
+Spaces:()=>`<h1>Spaces</h1><p class="sub">A space is a separate part of this server - a class, a family, a school. It has its own administrators, students, WebUntis keys and Parent links, and nobody inside can reach another space or this panel. You (the server administrator) can still see everything, because you run the machine.</p>
+ ${S.spaces.map(sp=>{const people=S.accounts.filter(a=>a.space===sp.id),kids=S.profiles.filter(p=>p.space===sp.id);return `<div class="card"><div class="kv"><span><b style="color:var(--text)">${esc(sp.label)}</b> <small>${esc(sp.id)}</small></span><b>${sp.profiles} student profile(s) · ${sp.accounts} account(s)</b></div>
+  ${people.length?`<table><tr><th>Name</th><th>Role</th></tr>${people.map(a=>`<tr><td>${esc(a.name)}${a.disabled?' <span class="tag">disabled</span>':""}</td><td><span class="tag ${a.role==="admin"?"admin":""}">${a.role==="admin"?"space admin":a.role}</span></td></tr>`).join("")}</table>`:"<p class='sub'>Nobody yet.</p>"}
+  <div class="row"><input id="sn-${esc(sp.id)}" placeholder="login name" size="14" autocomplete="off"><input id="sp-${esc(sp.id)}" type="password" placeholder="password (min 6)" autocomplete="new-password">
+  <select id="sr-${esc(sp.id)}"><option value="admin">Space administrator</option><option value="student">Student</option></select><input id="sl-${esc(sp.id)}" placeholder="shown as (student)" size="14">
+  <button class="b p" onclick="spMember('${esc(sp.id)}')">Add</button></div>
+  <div class="row"><button class="b" onclick="spRename('${esc(sp.id)}')">Rename</button><button class="b d" onclick="spRemove('${esc(sp.id)}')">Remove space</button></div></div>`}).join("")||"<div class='card'><p class='sub' style='margin:0'>No space yet.</p></div>"}
+ <h2>New space</h2><div class="card"><div class="row"><div><label>Short name (letters, digits, -)</label><input id="spi" placeholder="class-3b" maxlength="20"></div><div><label>Shown as</label><input id="spl" placeholder="Class 3B" maxlength="40"></div><button class="b p" onclick="spAdd()">Create</button></div>
+ <p class="sub">Create the space, then add its first administrator here. After that the space administrator adds the students (<b>/space</b>). A space can only be removed when it is empty. Accounts and children outside every space keep working as before.</p></div>`,
 Notifications:async()=>{const [m,h]=[await api("/api/admin/mail"),C.health];const M=C.mail,kinds={timetable:"Timetable changes (cancelled, room, substitute)",homework:"New homework",exam:"New exams",grade:"New grades"};
  return `<h1>Notifications</h1><p class="sub">The server can e-mail what changes at school, a daily summary, and warnings about the machine itself.</p>
  <h2>E-mail</h2><div class="card"><div class="row"><label style="display:inline-flex;gap:8px;align-items:center;color:var(--text)">${chk("me",M.enabled)} Send e-mails</label></div>
@@ -228,6 +237,15 @@ async function powerWake(k){const wake=k==="t"?$("#pw1").value:$("#pw2").value;i
 async function wolSend(n){try{const j=await api("/api/admin/wol",{name:n});say("Magic packet sent to "+j.device+" ("+j.sent+" broadcast(s)).")}catch(e){say(e.message,false)}}
 async function wolAdd(){const d=[...C.wol.devices,{name:$("#wn").value,mac:$("#wm").value}];cfg({wol:{devices:d}},"Saved")}
 async function wolDel(n){cfg({wol:{devices:C.wol.devices.filter(d=>d.name!==n)}},"Removed")}
+const spLabel=id=>(S.spaces.find(s=>s.id===id)||{}).label||id;
+async function spAdd(){try{await api("/api/admin/spaces",{action:"add",id:$("#spi").value,label:$("#spl").value});say("Space created");show("Spaces")}catch(e){say(e.message,false)}}
+async function spRename(id){const l=prompt("New name:",spLabel(id));if(l)try{await api("/api/admin/spaces",{action:"rename",id,label:l});show("Spaces")}catch(e){say(e.message,false)}}
+async function spRemove(id){if(!confirm("Remove the space "+spLabel(id)+"? It must be empty."))return;try{await api("/api/admin/spaces",{action:"remove",id});show("Spaces")}catch(e){say(e.message,false)}}
+async function spMember(id){try{await api("/api/admin/spaces/member",{space:id,role:$("#sr-"+id).value,name:$("#sn-"+id).value,password:$("#sp-"+id).value,label:$("#sl-"+id).value});say("Added");show("Spaces")}catch(e){say(e.message,false)}}
+async function moveAcc(n){const ids=S.spaces.map(s=>s.id+" ("+s.label+")").join(", ");const v=prompt("Move "+n+" to which space? ("+(ids||"no spaces yet")+")\nEmpty = out of every space. Its student list is cleared and it is signed out.","");if(v===null)return;
+ try{await api("/api/admin/accounts/space",{name:n,space:v.trim().split(" ")[0]});say("Moved");show("Accounts")}catch(e){say(e.message,false)}}
+async function kidSpace(id){const v=prompt("Put this child into which space? ("+(S.spaces.map(s=>s.id).join(", ")||"no spaces yet")+")\nEmpty = no space.","");if(v===null)return;
+ try{await api("/api/admin/profiles",{action:"space",id,space:v.trim()});show("Children")}catch(e){say(e.message,false)}}
 function newpw(n){const p=prompt("New password for "+n+":");if(p)run(()=>api("/api/admin/accounts/password",{name:n,password:p}),"Password changed")}
 function saveSections(){const g=r=>[...document.querySelectorAll(`input[data-r=${r}]:checked`)].map(i=>i.value);cfg({sections:{guest:g("guest"),user:g("user")}},"Saved")}
 function saveNet(){cfg({network:{hostname:$("#hn").value,mode:$("#nm").value,interface:$("#if").value,address:$("#ad")?$("#ad").value:"",gateway:$("#gw")?$("#gw").value:"",dns:($("#dn")?$("#dn").value:"")}},"Saved - applying…")}

@@ -15,6 +15,7 @@
   ssconfig wol own|list|add|remove|send|on|off   Wake-on-LAN (wake other machines; let this one be woken)
   ssconfig mail status|password|test|digest   e-mail about changes, homework, exams; daily summary; alerts
   ssconfig profile list|add|rename|remove     several children / schools (WebUntis keys): ssconfig untis --profile ID
+  ssconfig space list|add|rename|remove|admin|student   separate parts of the server, each with its own administrators and students
   ssconfig https on|off|status  encrypted web panel (certificate made on this machine)
   ssconfig autoupdate on [HH:MM]|off|status   install new releases by itself, with roll-back
   ssconfig account limits NAME [--expires DATE] [--sections ..] [--children ..]
@@ -524,16 +525,19 @@ def ask_password(prompt="Password: "):
 
 def cmd_account(args):
     if not args:
-        print("usage: ssconfig account add <name> <guest|user|admin> | list | passwd <name> | role <name> <role> | disable|enable|delete <name>")
+        print("usage: ssconfig account add <name> <guest|user|admin|student> [--space ID] | list | passwd <name> | role <name> <role> | space <name> <ID|none> | disable|enable|delete <name>")
         return 2
     sub, rest = args[0], args[1:]
     try:
         if sub == "list":
             for a in auth.accounts():
-                print(f"{a['name']:<20}{a['role']:<8}{'disabled' if a['disabled'] else ''}")
+                print(f"{a['name']:<20}{a['role']:<9}{('space ' + a['space']) if a['space'] else '':<20}{'disabled' if a['disabled'] else ''}")
         elif sub == "add" and len(rest) >= 2:
-            auth.create(rest[0].lower(), os.environ.get("SSC_NEW_PASSWORD") or ask_password(), rest[1])
+            space = rest[rest.index("--space") + 1] if "--space" in rest else ""
+            auth.create(rest[0].lower(), os.environ.get("SSC_NEW_PASSWORD") or ask_password(), rest[1], space=space)
             print("Created.")
+        elif sub == "space" and len(rest) == 2:
+            auth.set_space(rest[0], "" if rest[1] in ("none", "-") else rest[1])
         elif sub == "passwd" and rest:
             auth.set_password(rest[0], os.environ.get("SSC_NEW_PASSWORD") or ask_password("New password: "))
             print("Changed. That account was signed out.")
@@ -546,6 +550,40 @@ def cmd_account(args):
         else:
             return cmd_account([])
     except auth.AuthError as e:
+        print("Error:", e)
+        return 1
+    fix_owner()
+    return 0
+
+
+def cmd_space(args):
+    """ssconfig space list | add ID LABEL | rename ID LABEL | remove ID | admin ID NAME | student ID NAME [LABEL]
+       A space is a separate part of the server (a class, a family) with its own administrators, students, WebUntis keys and Parent links."""
+    sub, rest = (args[0], args[1:]) if args else ("list", [])
+    try:
+        if sub == "list":
+            for s in core.space_list():
+                print(f"{s['id']:<20}{s['label']}")
+                for a in auth.accounts_in(s["id"]):
+                    print(f"    {a['name']:<18}{'space admin' if a['role'] == 'admin' else a['role']}")
+                for p in core.profile_list(s["id"]):
+                    print(f"    student profile {p['id']}  {p['label']}")
+            return 0
+        if sub == "add" and rest:
+            core.space_add(rest[0], " ".join(rest[1:]) or rest[0])
+        elif sub == "rename" and len(rest) >= 2:
+            core.space_rename(rest[0], " ".join(rest[1:]))
+        elif sub == "remove" and rest:
+            core.space_remove(rest[0], accounts=len(auth.accounts_in(rest[0])))
+        elif sub in ("admin", "student") and len(rest) >= 2:
+            import serverapp
+            pid = serverapp.make_member(rest[0], "admin" if sub == "admin" else "student", rest[1].lower(), os.environ.get("SSC_NEW_PASSWORD") or ask_password(),
+                                        " ".join(rest[2:]), (), "console")
+            print("Created." + (f" Student profile: {pid}" if pid else ""))
+        else:
+            print(cmd_space.__doc__)
+            return 2
+    except (ValueError, auth.AuthError) as e:
         print("Error:", e)
         return 1
     fix_owner()
@@ -906,7 +944,11 @@ def cmd_profile(args):
                 print(f"  {p['id']:<12} {p['label']:<24} {untis_direct.describe() or 'no WebUntis key yet'}")
             return 0
         if sub == "add" and rest:
-            core.profile_add(rest[0], " ".join(rest[1:]) or rest[0])
+            sp = ""
+            if "--space" in rest:
+                i = rest.index("--space")
+                sp, rest = rest[i + 1], rest[:i] + rest[i + 2:]
+            core.profile_add(rest[0], " ".join(rest[1:]) or rest[0], sp)
         elif sub == "rename" and len(rest) >= 2:
             core.profile_rename(rest[0], " ".join(rest[1:]))
         elif sub == "remove" and rest:
@@ -1030,6 +1072,8 @@ def main(argv=None):
             return cmd_mail(rest)
         if c == "profile":
             return cmd_profile(rest)
+        if c == "space":
+            return cmd_space(rest)
         if c == "https":
             return cmd_https(rest)
         if c == "autoupdate":

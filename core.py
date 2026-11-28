@@ -61,47 +61,123 @@ def set_profile(pid):
     _PROFILE.id = pid if pid and pid != MAIN and PROFILE_RE.match(str(pid)) else None
 
 
-def vkey(name):
-    """Name of a secret in the vault for the current profile (the main profile keeps the old names)."""
-    pid = profile_id()
+def _vk(name, pid):
     return name if pid == MAIN else f"{name}@{pid}"
 
 
-def profile_list():
-    extra = config().get("profiles") or []
-    out = [{"id": MAIN, "label": str(config().get("main_label") or "Main")}]
-    out += [{"id": str(p["id"]), "label": str(p.get("label") or p["id"])} for p in extra if isinstance(p, dict) and PROFILE_RE.match(str(p.get("id", "")))]
-    return out
+def vkey(name):
+    """Name of a secret in the vault for the current profile (the main profile keeps the old names)."""
+    return _vk(name, profile_id())
 
 
-def profile_ids():
-    return [p["id"] for p in profile_list()]
+SPACE_RE = PROFILE_RE
 
 
-def profile_add(pid, label):
+def _profiles_raw():
+    return [p for p in (config().get("profiles") or []) if isinstance(p, dict) and PROFILE_RE.match(str(p.get("id", "")))]
+
+
+def profile_list(space=None):
+    """All profiles (space=None) or those of one space ('' = the ones that belong to no space)."""
+    out = [{"id": MAIN, "label": str(config().get("main_label") or "Main"), "space": str((config().get("main_space") or ""))}]
+    out += [{"id": str(p["id"]), "label": str(p.get("label") or p["id"]), "space": str(p.get("space") or "")} for p in _profiles_raw()]
+    return out if space is None else [p for p in out if p["space"] == space]
+
+
+def profile_ids(space=None):
+    return [p["id"] for p in profile_list(space)]
+
+
+def profile_space(pid):
+    return next((p["space"] for p in profile_list() if p["id"] == pid), None)
+
+
+def space_list():
+    return [{"id": str(s["id"]), "label": str(s.get("label") or s["id"])} for s in (config().get("spaces") or [])
+            if isinstance(s, dict) and SPACE_RE.match(str(s.get("id", "")))]
+
+
+def space_ids():
+    return [s["id"] for s in space_list()]
+
+
+def _clean_label(label, fallback=""):
+    return re.sub(r"[\x00-\x1f<>]", "", str(label or "")).strip()[:40] or fallback
+
+
+def space_add(sid, label):
+    sid = str(sid or "").strip().lower()
+    if not SPACE_RE.match(sid):
+        raise ValueError("space id: letters, digits and '-' (max 20)")
+    if sid in space_ids():
+        raise ValueError("that space exists already")
+    if len(space_ids()) >= 50:
+        raise ValueError("at most 50 spaces")
+    cfg = config()
+    cfg["spaces"] = space_list() + [{"id": sid, "label": _clean_label(label, sid)}]
+    save_config(cfg)
+    return sid
+
+
+def space_rename(sid, label):
+    if sid not in space_ids():
+        raise ValueError("no such space")
+    cfg = config()
+    cfg["spaces"] = [dict(s, label=_clean_label(label, sid)) if s["id"] == sid else s for s in space_list()]
+    save_config(cfg)
+
+
+def space_remove(sid, accounts=0):
+    """Only an empty space can go: its students' data is never deleted as a side effect."""
+    if sid not in space_ids():
+        raise ValueError("no such space")
+    n = len(profile_ids(sid))
+    if n or accounts:
+        raise ValueError(f"the space still has {n} profile(s) and {accounts} account(s) - remove or move them first")
+    cfg = config()
+    cfg["spaces"] = [s for s in space_list() if s["id"] != sid]
+    save_config(cfg)
+
+
+def profile_add(pid, label, space=""):
     pid = str(pid or "").strip().lower()
     if not PROFILE_RE.match(pid) or pid == MAIN:
         raise ValueError("profile id: letters, digits and '-' (max 20), not 'main'")
-    label = re.sub(r"[\x00-\x1f<>]", "", str(label or "")).strip()[:40] or pid
+    if space and space not in space_ids():
+        raise ValueError("no such space")
     cfg = config()
     if pid in profile_ids():
         raise ValueError("that profile exists already")
-    if len(cfg.get("profiles") or []) >= 9:
-        raise ValueError("at most 10 profiles")
-    cfg["profiles"] = list(cfg.get("profiles") or []) + [{"id": pid, "label": label}]
+    if len(_profiles_raw()) >= 199:
+        raise ValueError("too many profiles")
+    cfg["profiles"] = _profiles_raw() + [{"id": pid, "label": _clean_label(label, pid), "space": space or ""}]
     save_config(cfg)
     return pid
 
 
+def profile_set_space(pid, space):
+    """Move a profile into a space ('' = out of every space). Its data stays where it is."""
+    if space and space not in space_ids():
+        raise ValueError("no such space")
+    cfg = config()
+    if pid == MAIN:
+        cfg["main_space"] = space or ""
+    elif pid in [p["id"] for p in _profiles_raw()]:
+        cfg["profiles"] = [dict(p, space=space or "") if p["id"] == pid else p for p in _profiles_raw()]
+    else:
+        raise ValueError("no such profile")
+    save_config(cfg)
+
+
 def profile_rename(pid, label):
-    label = re.sub(r"[\x00-\x1f<>]", "", str(label or "")).strip()[:40]
+    label = _clean_label(label)
     if not label:
         raise ValueError("a name is needed")
     cfg = config()
     if pid == MAIN:
         cfg["main_label"] = label
     elif pid in profile_ids():
-        cfg["profiles"] = [dict(p, label=label) if p["id"] == pid else p for p in cfg.get("profiles") or []]
+        cfg["profiles"] = [dict(p, label=label) if p["id"] == pid else p for p in _profiles_raw()]
     else:
         raise ValueError("no such profile")
     save_config(cfg)
@@ -111,7 +187,10 @@ def profile_remove(pid):
     if pid == MAIN or pid not in profile_ids():
         raise ValueError("that profile can't be removed")
     cfg = config()
-    cfg["profiles"] = [p for p in cfg.get("profiles") or [] if p["id"] != pid]
+    cfg["profiles"] = [p for p in _profiles_raw() if p["id"] != pid]
+    pm = dict(cfg.get("profile_mail") or {})
+    pm.pop(pid, None)
+    cfg["profile_mail"] = pm
     save_config(cfg)
     shutil.rmtree(HOME / "profiles" / pid, ignore_errors=True)
 
@@ -621,47 +700,74 @@ def stats(store):
 PARENT_SECTIONS = ("today", "timetable", "homework", "exams", "plan", "changes", "grades", "absences")
 
 
+def _links_long():
+    return str(config().get("links_long", "")).lower() in ("1", "true", "yes", "on")
+
+
 def parent_token(rotate=False):
-    """The secret in the Parent link (kept in the Keychain, not in a file). Anyone with the link can see the Parent
-    view - nothing else."""
+    """The secret in the Parent link of the current profile (kept in the vault, not in a file). Anyone with the link can see that
+    profile's Parent view - nothing else, and nothing of any other profile."""
     import vault
-    long_links = str(config().get("links_long", "")).lower() in ("1", "true", "yes", "on")
-    tok = None if rotate else vault.get("parent-token")
+    long_links = _links_long()
+    tok = None if rotate else vault.get(vkey("parent-token"))
     if tok and long_links and len(tok) < 64:   # "require long link": replace a short link by a long one
         tok = None
     if not tok:
         tok = secrets.token_urlsafe(48 if long_links else 24)
-        vault.set("parent-token", tok)
-        save_config({**config(), "links_created": time.time()})        # for "the link expires after N days"
+        vault.set(vkey("parent-token"), tok)
+        pid = profile_id()
+        save_config({**config(), _vk("links_created", pid): time.time()})        # for "the link expires after N days"
     _TOK["t"] = 0.0
     return tok
 
 
 def parent_link_expiry():
-    """-> (expired, ends_at epoch or None). Setting 'links_expire_days' (0 = never) counts from when the link was made."""
+    """-> (expired, ends_at epoch or None) for the current profile's link. Setting 'links_expire_days' (0 = never) counts from when the link was made."""
     try:
         days = int(config().get("links_expire_days") or 0)
     except (TypeError, ValueError):
         days = 0
     if days <= 0:
         return False, None
-    created = float(config().get("links_created") or 0)
+    key = _vk("links_created", profile_id())
+    created = float(config().get(key) or 0)
     if not created:                                  # a link from before this setting existed: counts from now
         created = time.time()
-        save_config({**config(), "links_created": created})
+        save_config({**config(), key: created})
     end = created + days * 86400
     return time.time() > end, end
 
 
-_TOK = {"t": 0.0, "v": ""}
+_TOK = {"t": 0.0, "v": {}}
+
+
+def parent_tokens():
+    """{profile id: token} of every profile that has a Parent link. Short-lived cache: the Parent web server checks it on every request."""
+    if time.time() - _TOK["t"] > 5:
+        import vault
+        v = {}
+        for pid in profile_ids():
+            tok = vault.get(_vk("parent-token", pid))
+            if tok:
+                v[pid] = tok
+        _TOK.update(t=time.time(), v=v)
+    return _TOK["v"]
+
+
+def parent_token_owner(presented):
+    """Which profile does this link token belong to? -> id or None. Compares against every token in constant time."""
+    need_long = _links_long()
+    found = None
+    p = str(presented).encode()
+    for pid, tok in parent_tokens().items():
+        if secrets.compare_digest(p, tok.encode()) and not (need_long and len(tok) < 64):
+            found = pid
+    return found
 
 
 def parent_token_peek():
-    """Short-lived cached read for the Parent web server (it checks the token on every request)."""
-    if time.time() - _TOK["t"] > 5:
-        import vault
-        _TOK.update(t=time.time(), v=vault.get("parent-token") or "")
-    return _TOK["v"]
+    """The main profile's token (older callers)."""
+    return parent_tokens().get(MAIN, "")
 
 
 def parent_sections():

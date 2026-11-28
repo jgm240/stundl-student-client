@@ -17,9 +17,10 @@ import time
 
 import core
 
-ROLES = ("guest", "user", "admin")
+BASE_ROLES = ("guest", "user", "admin")          # what the installer and the global administrators work with
+ROLES = BASE_ROLES + ("student",)                 # student: one profile in one space; admin with a space: that space's administrator
 NAME_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{1,31}$")
-MIN_LEN = {"guest": 6, "user": 6, "admin": 6}
+MIN_LEN = {"guest": 6, "user": 6, "admin": 6, "student": 6}
 N, R, P = 2 ** 14, 8, 1
 
 
@@ -38,7 +39,8 @@ def db():
     for col, kind in (("prefs", "text"),            # per-user language / theme / accent
                       ("expires", "real"),          # end of the last valid day (epoch seconds); null = never
                       ("sections", "text"),         # this account's own list of Parent sections ("" = the role's list)
-                      ("profiles", "text")):        # the children/schools this account may see ("" = all)
+                      ("profiles", "text"),         # the children/schools this account may see ("" = all of its space)
+                      ("space", "text")):           # the space this account belongs to ("" = none: the server's own administrators and accounts)
         if col not in have:
             c.execute(f"alter table accounts add column {col} {kind}")
             c.commit()
@@ -92,24 +94,61 @@ def _check_password(role, password):
 
 
 # ------------------------------------------------------------------ accounts
-def create(name, password, role, con=None, who="console"):
+def _check_space(role, space):
+    if space and space not in core.space_ids():
+        raise AuthError("no such space")
+    if role == "student" and not space:
+        raise AuthError("a student belongs to a space")
+
+
+def create(name, password, role, con=None, who="console", space=""):
     con = con or db()
     _check_name(name)
     if role not in ROLES:
-        raise AuthError("role must be guest, user or admin")
+        raise AuthError("role must be guest, user, student or admin")
+    _check_space(role, space)
     _check_password(role, password)
     if con.execute("select 1 from accounts where name=?", (name,)).fetchone():
         raise AuthError(f"'{name}' already exists")
-    con.execute("insert into accounts(name, role, pw, created) values(?,?,?,?)", (name, role, hash_password(password), time.time()))
+    con.execute("insert into accounts(name, role, pw, created, space) values(?,?,?,?,?)", (name, role, hash_password(password), time.time(), space or ""))
     con.commit()
-    audit(con, who, "account-created", f"{name} ({role})")
+    audit(con, who, "account-created", f"{name} ({role}{', space ' + space if space else ''})")
 
 
 def accounts(con=None):
     con = con or db()
     return [dict(name=n, role=r, created=c, last_login=l, disabled=bool(d), expires=e,
-                 sections=[x for x in (s or "").split(",") if x], profiles=[x for x in (p or "").split(",") if x])
-            for n, r, c, l, d, e, s, p in con.execute("select name, role, created, last_login, disabled, expires, sections, profiles from accounts order by role desc, name")]
+                 sections=[x for x in (s or "").split(",") if x], profiles=[x for x in (p or "").split(",") if x], space=sp or "")
+            for n, r, c, l, d, e, s, p, sp in con.execute("select name, role, created, last_login, disabled, expires, sections, profiles, space from accounts order by role desc, name")]
+
+
+def accounts_in(space, con=None):
+    """The accounts of one space ('' = the ones that belong to no space)."""
+    return [a for a in accounts(con) if a["space"] == (space or "")]
+
+
+def space_of(name, con=None):
+    row = (con or db()).execute("select space from accounts where name=?", (name,)).fetchone()
+    return (row[0] or "") if row else None
+
+
+def count_global_admins(con):
+    return con.execute("select count(*) from accounts where role='admin' and disabled=0 and coalesce(space,'')=''").fetchone()[0]
+
+
+def set_space(name, space, con=None, who="console"):
+    """Move an account into a space ('' = out of every space). Its profile list is cleared; its open sessions end."""
+    con = con or db()
+    row = con.execute("select role, coalesce(space,'') from accounts where name=?", (name,)).fetchone()
+    if not row:
+        raise AuthError("no such account")
+    _check_space(row[0], space)
+    if row[0] == "admin" and not row[1] and space and count_global_admins(con) <= 1:
+        raise AuthError("you can't move the last server administrator into a space")
+    con.execute("update accounts set space=?, profiles='' where name=?", (space or "", name))
+    con.commit()
+    audit(con, who, "account-space", f"{name} -> {space or '(none)'}")
+    drop_sessions(name)
 
 
 def expiry_epoch(day):
@@ -130,8 +169,8 @@ def set_limits(name, expires=None, sections=None, profiles=None, con=None, who="
     row = con.execute("select role from accounts where name=?", (name,)).fetchone()
     if not row:
         raise AuthError(f"no account '{name}'")
-    if row[0] == "admin" and (expires or sections or profiles):
-        raise AuthError("administrators can't be limited (that would risk locking everybody out)")
+    if row[0] == "admin" and not auth_space(con, name) and (expires or sections or profiles):
+        raise AuthError("the server's administrators can't be limited (that would risk locking everybody out)")
     parts, args = [], []
     if expires is not None:
         parts.append("expires=?")
@@ -173,12 +212,28 @@ def delete(name, con=None, who="console"):
     row = con.execute("select role from accounts where name=?", (name,)).fetchone()
     if not row:
         raise AuthError("no such account")
-    if row[0] == "admin" and con.execute("select count(*) from accounts where role='admin' and disabled=0").fetchone()[0] <= 1:
+    if row[0] == "admin" and not auth_space(con, name) and count_global_admins(con) <= 1:
         raise AuthError("you can't delete the last admin")
     con.execute("delete from accounts where name=?", (name,))
     con.commit()
     audit(con, who, "account-deleted", name)
     drop_sessions(name)
+
+
+def change_own_password(name, current, new, con=None, ip=""):
+    """A signed-in account changes its own password: the current one must be right (and wrong guesses are throttled like logins)."""
+    con = con or db()
+    now = time.time()
+    keys = [("ip", ip), ("pw:" + name, name)]
+    if _blocked(keys, now):
+        raise AuthError("Too many attempts. Wait a little and try again.")
+    row = con.execute("select role, pw from accounts where name=?", (name,)).fetchone()
+    if not row or not check_password(current, row[1]):
+        for k in keys:
+            _FAILS.setdefault(k, []).append(now)
+        audit(con, name, "password-change-failed", "", ip)
+        raise AuthError("The current password is wrong.")
+    set_password(name, new, con, who=name)
 
 
 def set_password(name, password, con=None, who="console"):
@@ -198,8 +253,10 @@ def set_role(name, role, con=None, who="console"):
     row = con.execute("select role from accounts where name=?", (name,)).fetchone()
     if not row or role not in ROLES:
         raise AuthError("no such account or role")
-    if row[0] == "admin" and role != "admin" and con.execute("select count(*) from accounts where role='admin' and disabled=0").fetchone()[0] <= 1:
+    sp = con.execute("select coalesce(space,'') from accounts where name=?", (name,)).fetchone()[0]
+    if row[0] == "admin" and not sp and role != "admin" and count_global_admins(con) <= 1:
         raise AuthError("you can't demote the last admin")
+    _check_space(role, sp)
     con.execute("update accounts set role=? where name=?", (role, name))
     con.commit()
     audit(con, who, "role-changed", f"{name} -> {role}")
@@ -211,7 +268,7 @@ def set_disabled(name, disabled, con=None, who="console"):
     row = con.execute("select role from accounts where name=?", (name,)).fetchone()
     if not row:
         raise AuthError("no such account")
-    if disabled and row[0] == "admin" and con.execute("select count(*) from accounts where role='admin' and disabled=0").fetchone()[0] <= 1:
+    if disabled and row[0] == "admin" and not auth_space(con, name) and count_global_admins(con) <= 1:
         raise AuthError("you can't disable the last admin")
     con.execute("update accounts set disabled=? where name=?", (int(disabled), name))
     con.commit()
@@ -240,8 +297,12 @@ def set_prefs(name, prefs, con=None):
     return cur
 
 
+def auth_space(con, name):
+    return (con.execute("select coalesce(space,'') from accounts where name=?", (name,)).fetchone() or [""])[0]
+
+
 def has_admin(con=None):
-    return (con or db()).execute("select count(*) from accounts where role='admin' and disabled=0").fetchone()[0] > 0
+    return count_global_admins(con or db()) > 0
 
 
 # ------------------------------------------------------------------ audit + throttling
@@ -285,7 +346,7 @@ def login(name, password, ip="", con=None, hours=12):
     if _blocked(keys, now):
         audit(con, name, "login-throttled", "", ip)
         raise AuthError("Too many attempts. Wait a little and try again.")
-    row = con.execute("select role, pw, disabled, expires from accounts where name=?", (name,)).fetchone()
+    row = con.execute("select role, pw, disabled, expires, coalesce(space,'') from accounts where name=?", (name,)).fetchone()
     ok = bool(row) and not row[2] and check_password(password, row[1])
     if not row:
         hash_password(password)   # similar work for unknown names (no timing hint)
@@ -302,12 +363,12 @@ def login(name, password, ip="", con=None, hours=12):
     con.execute("update accounts set last_login=? where name=?", (now, name))
     con.commit()
     audit(con, name, "login", row[0], ip)
-    return new_session(name, row[0], ip, hours)
+    return new_session(name, row[0], ip, hours, space=row[4])
 
 
-def new_session(name, role, ip="", hours=12, anon=False):
+def new_session(name, role, ip="", hours=12, anon=False, space=""):
     sid = secrets.token_urlsafe(32)
-    SESSIONS[sid] = dict(name=name, role=role, ip=ip, at=time.time(), exp=time.time() + hours * 3600, anon=anon)
+    SESSIONS[sid] = dict(name=name, role=role, ip=ip, at=time.time(), exp=time.time() + hours * 3600, anon=anon, space=space)
     return sid
 
 
@@ -323,7 +384,7 @@ def session(sid):
     if s["exp"] < time.time():
         SESSIONS.pop(sid, None)
         return None
-    if not s.get("anon") and s["role"] != "admin" and expired(s["name"]):          # an expiry also ends sessions that are open
+    if not s.get("anon") and (s["role"] != "admin" or s.get("space")) and expired(s["name"]):          # an expiry also ends sessions that are open
         SESSIONS.pop(sid, None)
         return None
     return s

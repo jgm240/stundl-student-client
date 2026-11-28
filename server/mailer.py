@@ -59,9 +59,18 @@ def build_message(m, subject, body):
     return msg
 
 
-def send(cfg, subject, body, smtp_class=None, password=None):
-    """Send one mail to all recipients. Raises MailError with a readable reason."""
-    m = cfg["mail"]
+def recipients(cfg, pid):
+    """Who gets the mails about this profile. A profile inside a space: only the addresses its own people set (never the server's list -
+    one space must not receive another space's data). A profile outside spaces: its own list if it has one, else the server's list."""
+    own = list((core.config().get("profile_mail") or {}).get(pid) or [])
+    if core.profile_space(pid):
+        return own
+    return own or list(cfg["mail"]["to"])
+
+
+def send(cfg, subject, body, smtp_class=None, password=None, to=None):
+    """Send one mail to all recipients (`to`, or the server's list). Raises MailError with a readable reason."""
+    m = dict(cfg["mail"], to=list(to) if to is not None else cfg["mail"]["to"])
     if not (m["host"] and m["to"] and m["sender"]):
         raise MailError("the mail settings are incomplete (server, sender, recipient)")
     pw = password if password is not None else (_vault().get(VAULT_KEY) if m["user"] else None)
@@ -121,8 +130,9 @@ def after_sync(changes, pid):
     if not m["enabled"]:
         return
     msg = format_changes(changes, pid, m["kinds"])
-    if msg:
-        send(cfg, *msg)
+    to = recipients(cfg, pid)
+    if msg and to:
+        send(cfg, *msg, to=to)
 
 
 def register():
@@ -183,24 +193,25 @@ def digest_due(cfg, now=None):
 
 
 def send_digest(cfg, now=None):
-    """One mail with a section per profile. Marks the day as done only when it was sent."""
+    """One mail per recipient group, with a section for each profile that group may read. Marks the day as done once all went out."""
     import json
     now = now or datetime.now()
-    parts = []
+    groups = {}
     keep = getattr(core._PROFILE, "id", None)
     try:
         for pid in core.profile_ids():
             core.set_profile(pid)
-            if core.db_path().exists():
-                parts.append(digest_text(core.state(core.db()), pid, now.date()))
+            to = tuple(recipients(cfg, pid))
+            if to and core.db_path().exists():
+                groups.setdefault(to, []).append(digest_text(core.state(core.db()), pid, now.date()))
     finally:
         core._PROFILE.id = keep
-    if parts:
-        send(cfg, "Daily summary", "\n\n".join(parts))
+    for to, parts in groups.items():
+        send(cfg, "Daily summary", "\n\n".join(parts), to=list(to))
     p = marker_path()
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(json.dumps({"day": now.date().isoformat()}))
-    return len(parts)
+    return sum(len(v) for v in groups.values())
 
 
 def send_alerts(cfg, fresh):

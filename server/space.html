@@ -1,0 +1,104 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>My space – Stundl Student Client</title><meta name="color-scheme" content="light dark"><meta name="robots" content="noindex">
+<style>
+:root{--bg:#f3f5fb;--surface:#fff;--surface2:#eef1f8;--text:#131826;--muted:#667085;--line:#e3e7f0;--accent:#4f46e5;--on:#fff;--ok:#16a34a;--warn:#d97706;--bad:#dc2626;--side:#fff;--shadow:0 1px 2px rgba(16,24,40,.05),0 8px 22px rgba(16,24,40,.06)}
+@media(prefers-color-scheme:dark){:root{--bg:#0b0f17;--surface:#141a26;--surface2:#1b2332;--text:#eef1f8;--muted:#98a3b7;--line:#252f43;--accent:#8e90ff;--on:#0b0f17;--ok:#4ade80;--warn:#fbbf24;--bad:#f87171;--side:#0f1420;--shadow:0 10px 28px rgba(0,0,0,.35)}}
+*{box-sizing:border-box}body{margin:0;font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;color:var(--text);background:var(--bg)}
+#app{display:grid;grid-template-columns:230px 1fr;min-height:100vh}
+aside{background:var(--side);border-right:1px solid var(--line);padding:18px 12px;position:sticky;top:0;height:100vh}
+aside b{display:block;padding:4px 10px 14px;font-size:17px}aside small{color:var(--muted);font-weight:400;display:block}
+nav button{display:block;width:100%;text-align:left;border:0;background:transparent;color:var(--text);font:inherit;padding:9px 12px;border-radius:10px;cursor:pointer}
+nav button:hover{background:var(--surface2)}nav button.on{background:color-mix(in srgb,var(--accent) 14%,transparent);color:var(--accent);font-weight:650}
+aside .back{margin-top:14px;padding:0 10px;font-size:14px}aside a{color:var(--accent);text-decoration:none}
+main{padding:26px 32px 70px;max-width:980px}h1{margin:0 0 4px;font-size:26px;letter-spacing:-.02em}.sub{color:var(--muted);margin:0 0 22px}
+h2{font-size:12px;text-transform:uppercase;letter-spacing:.09em;color:var(--muted);margin:26px 2px 10px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px 18px;margin-bottom:12px;box-shadow:var(--shadow)}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:8px 0}label{font-size:13px;color:var(--muted);display:block;margin-bottom:4px}
+input,select,textarea{font:inherit;color:var(--text);background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:8px 12px;outline:none}
+input:focus,select:focus,textarea:focus{border-color:var(--accent)}input[type=checkbox]{width:18px;height:18px;accent-color:var(--accent)}
+button.b{font:inherit;font-weight:600;border:1px solid var(--line);background:var(--surface);color:var(--text);border-radius:10px;padding:8px 14px;cursor:pointer}
+button.p{background:var(--accent);color:var(--on);border-color:transparent}button.d{color:var(--bad)}
+table{width:100%;border-collapse:collapse}td,th{text-align:left;padding:9px 8px;border-bottom:1px solid var(--line);font-size:14px}th{color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.06em}
+.tag{font-size:11px;font-weight:700;padding:2px 9px;border-radius:99px;background:var(--surface2)}.tag.admin{background:color-mix(in srgb,var(--accent) 20%,transparent);color:var(--accent)}
+code{background:var(--surface2);padding:2px 7px;border-radius:6px;font-size:.92em;word-break:break-all}
+.msg{padding:10px 14px;border-radius:10px;margin:10px 0;font-size:14px;display:none}.msg.ok{display:block;background:color-mix(in srgb,var(--ok) 14%,transparent)}.msg.err{display:block;background:color-mix(in srgb,var(--bad) 14%,transparent);color:var(--bad)}
+.kv{display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid var(--line)}.kv:last-child{border:0}.kv span{color:var(--muted)}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}@media(max-width:900px){#app{display:block}aside{position:static;height:auto}main{padding:18px}.grid2{grid-template-columns:1fr}nav{display:flex;flex-wrap:wrap}nav button{width:auto}}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:6px}
+.tile{display:flex;flex-direction:column;gap:2px;padding:12px 14px;border-radius:14px;background:var(--surface);border:1px solid var(--line)}
+.tile small{font-size:11px;text-transform:uppercase;letter-spacing:.07em;font-weight:700;color:var(--muted)}.tile b{font-size:24px;letter-spacing:-.02em}.tile span{font-size:12.5px;color:var(--muted)}
+.tile.warn b{color:#dc2626}
+.logbox{white-space:pre-wrap;word-break:break-word;font:12.5px/1.45 ui-monospace,Menlo,Consolas,monospace;background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:12px;max-height:380px;overflow:auto;margin:10px 0 0}
+label.filebtn{cursor:pointer;display:inline-flex;align-items:center}
+</style></head><body>
+<div id="app"><aside><b id="title">My space<small id="sub"></small></b><nav id="nav"></nav><div class="back"><a href="/">← Back to the app</a><br><br><a href="#" onclick="logout()">Log out</a></div></aside>
+<main><div id="msg" class="msg"></div><div id="page">Loading…</div></main></div>
+<script>
+const $=s=>document.querySelector(s),esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const api=async(p,b)=>{const r=await fetch(p,b===undefined?{}:{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b)});let j={};try{j=await r.json()}catch(e){}
+  if(r.status===401){location.href="/";throw 0}if(r.status===403&&!j.error){location.href="/";throw 0}if(!r.ok){throw new Error(j.error||("HTTP "+r.status))}return j};
+const say=(t,ok=true)=>{const m=$("#msg");m.className="msg "+(ok?"ok":"err");m.textContent=t;if(ok)setTimeout(()=>m.className="msg",5000)};
+const when=t=>t?new Date(t*1000).toLocaleString("en-GB"):"never";
+const chk=(id,v)=>`<input type="checkbox" id="${id}" ${v?"checked":""}>`;
+let D=null,tab="";
+const run=async(f,okmsg)=>{try{await f();if(okmsg)say(okmsg);await load()}catch(e){if(e)say(e.message,false)}};
+async function logout(){await api("/api/logout",{});location.href="/"}
+async function load(){D=await api("/api/space/overview");const adm=D.role==="admin";
+  $("#title").firstChild.textContent=D.space.label;$("#sub").textContent=(adm?"Space administrator":"Student")+" · "+D.name;
+  const tabs=adm?["Students","People","Account"]:["My profile","Account"];if(!tabs.includes(tab))tab=tabs[0];
+  $("#nav").innerHTML=tabs.map(x=>`<button class="${x===tab?"on":""}" onclick="tab='${x}';load()">${x}</button>`).join("");
+  $("#page").innerHTML=PAGES[tab]()}
+const profCard=(p,i)=>`<div class="card"><div class="kv"><span>Student</span><b>${esc(p.label)}</b></div>
+ <div class="kv"><span>WebUntis</span><b>${esc(p.untis||"not connected")}</b></div><div class="kv"><span>Last data update</span><b>${when(p.synced_at)}</b></div>
+ <h2 style="margin:14px 2px 8px">WebUntis key</h2>
+ <div class="row"><div style="flex:1"><label>The Untis Mobile link (WebUntis → Profile → Freigaben / Access → Untis Mobile → scan the QR code and paste the text)</label><input id="qr${i}" style="width:100%" type="password" placeholder="untis://setschool?url=…" autocomplete="off"></div></div>
+ <p class="sub" style="margin:6px 0">or the four values:</p>
+ <div class="row"><div><label>Server</label><input id="us${i}" placeholder="xyz.webuntis.com" autocomplete="off"></div><div><label>School login name</label><input id="uc${i}" autocomplete="off"></div>
+ <div><label>User name</label><input id="uu${i}" autocomplete="off"></div><div><label>Key</label><input id="uk${i}" type="password" autocomplete="off"></div></div>
+ <div class="row"><button class="b p" onclick="saveKey(${i})">Save and test</button><button class="b" onclick="run(()=>api('/api/space/sync',{profile:'${esc(p.id)}'}),'Sync started')">Sync now</button>
+ ${p.untis?`<button class="b d" onclick="if(confirm('Remove the key?'))run(()=>api('/api/space/untis/clear',{profile:'${esc(p.id)}'}),'Removed')">Remove key</button>`:""}</div>
+ <h2 style="margin:14px 2px 8px">Parent link</h2>
+ ${D.links_enabled?(p.links.map(u=>`<div class="kv"><span>${esc(u.host)}</span><div><code>${esc(u.browser)}</code><br><code>${esc(u.wall)}</code></div></div>`).join("")||"<span class='sub'>No network address yet.</span>")
+   +`<div class="row"><button class="b" onclick="if(confirm('Make a new link? The old one stops working.'))run(()=>api('/api/space/link/rotate',{profile:'${esc(p.id)}'}),'New link made')">New link</button>
+   <span class="sub">${p.expired?"<b style='color:var(--bad)'>This link has expired - make a new one.</b>":p.expires_at?"Valid until "+when(p.expires_at)+".":"This link shows this student only."} Anyone who has it can see this student's timetable, homework and exams.</span></div>`:"<span class='sub'>Links are turned off on this server.</span>"}
+ <h2 style="margin:14px 2px 8px">E-mail</h2>
+ <div class="row"><div style="flex:1"><label>Send this student's changes and daily summary to (comma separated, up to 5)</label><input id="mt${i}" style="width:100%" value="${esc(p.mail_to.join(", "))}" placeholder="name@example.com"></div><button class="b p" onclick="saveMail(${i})">Save</button></div>
+ <p class="sub">${D.mail_enabled?"Mails are sent through this server's mail account. They go to these addresses only.":"The server administrator has not turned e-mail on yet."}</p>
+ ${D.role==="admin"?`<div class="row"><button class="b" onclick="renameP('${esc(p.id)}')">Rename</button><button class="b d" onclick="removeP('${esc(p.id)}')">Remove this student and all its data</button></div>`:""}</div>`;
+const PAGES={
+"My profile":()=>`<h1>My profile</h1><p class="sub">Your WebUntis key, Parent link and e-mail. Nobody else on this server can see them.</p>${D.profiles.map(profCard).join("")||"<div class='card'>No profile is assigned to you yet - ask your administrator.</div>"}`,
+Students:()=>`<h1>Students</h1><p class="sub">Each student has their own WebUntis key, data and Parent link. Only people of this space can see them.</p>${D.profiles.map(profCard).join("")}
+ <h2>Add a student without an account</h2><div class="card"><div class="row"><input id="np" placeholder="name" maxlength="40"><button class="b p" onclick="addP()">Add</button></div><p class="sub">For a student who does not log in themselves (the Parent link and the e-mails still work). To give them a login, use <b>People</b>.</p></div>`,
+People:()=>{const name=p=>(D.profiles.find(x=>x.id===p)||{}).label||p;
+ return `<h1>People</h1><p class="sub">Accounts of this space. They can never see another space.</p>
+ <div class="card"><table><tr><th>Name</th><th>Role</th><th>Sees</th><th></th></tr>${D.people.map(a=>`<tr><td>${esc(a.name)} ${a.disabled?'<span class="tag">disabled</span>':""}${a.expires?` <span class="tag">until ${new Date(a.expires*1000).toLocaleDateString("en-GB")}</span>`:""}</td><td><span class="tag ${a.role==="admin"?"admin":""}">${a.role==="admin"?"space admin":a.role}</span></td>
+ <td>${a.role==="admin"?"everything in this space":esc(a.profiles.map(name).join(", ")||"-")}</td><td style="text-align:right;white-space:nowrap">
+ <button class="b" onclick="newpw('${esc(a.name)}')">Password</button>
+ <button class="b" onclick="run(()=>api('/api/space/accounts/disable',{name:'${esc(a.name)}',disabled:${!a.disabled}}))">${a.disabled?"Enable":"Disable"}</button>
+ <button class="b" onclick="endDate('${esc(a.name)}')">End date</button>
+ ${a.name!==D.name?`<button class="b d" onclick="delP('${esc(a.name)}','${a.role}')">Delete</button>`:""}</td></tr>`).join("")}</table></div>
+ <h2>Add a person</h2><div class="card"><div class="row"><div><label>Login name</label><input id="an" autocomplete="off" placeholder="anna"></div><div><label>Password (min 6)</label><input id="ap" type="password" autocomplete="new-password"></div>
+ <div><label>Role</label><select id="ar" onchange="roleHint()"><option value="student">Student (own profile, own login)</option><option value="user">Parent (sees chosen students)</option><option value="guest">Guest (sees chosen students, fewer sections)</option><option value="admin">Space administrator</option></select></div>
+ <div id="al"><label>Shown as</label><input id="at" placeholder="Anna"></div></div>
+ <div id="pick" class="row" style="display:none">${D.profiles.map(p=>`<label style="display:inline-flex;gap:6px;align-items:center;color:var(--text)"><input type="checkbox" class="pk" value="${esc(p.id)}"> ${esc(p.label)}</label>`).join("")||"<span class='sub'>Add a student first.</span>"}</div>
+ <div class="row"><button class="b p" onclick="addAcc()">Create</button></div>
+ <p class="sub">A student gets a profile of their own with their own key and Parent link. A space administrator manages this space (not other spaces, not the server).</p></div>`},
+Account:()=>`<h1>My account</h1><p class="sub">Signed in as <b>${esc(D.name)}</b>.</p>
+ <div class="card"><div class="row"><div><label>Current password</label><input id="pc" type="password" autocomplete="current-password"></div><div><label>New password (min 6)</label><input id="pn" type="password" autocomplete="new-password"></div><button class="b p" onclick="chPw()">Change password</button></div>
+ <p class="sub">After changing it you sign in again.</p></div>`};
+function roleHint(){const r=$("#ar").value;$("#pick").style.display=(r==="user"||r==="guest")?"flex":"none";$("#al").style.display=r==="student"?"block":"none"}
+async function saveKey(i){const p=D.profiles[i],qr=$("#qr"+i).value.trim();
+  const body=qr?{qr,test:true,profile:p.id}:{server:$("#us"+i).value,school:$("#uc"+i).value,user:$("#uu"+i).value,key:$("#uk"+i).value,test:true,profile:p.id};
+  say("Saving and testing the login…");try{const r=await api("/api/space/untis",body);say(r.message||"Saved",r.tested!==false);setTimeout(load,1500)}catch(e){say(e.message,false)}}
+function saveMail(i){run(()=>api("/api/space/mail",{profile:D.profiles[i].id,to:$("#mt"+i).value}),"Saved")}
+function addP(){const l=$("#np").value;run(()=>api("/api/space/profiles",{action:"add",label:l}),"Added")}
+function renameP(id){const l=prompt("New name:");if(l)run(()=>api("/api/space/profiles",{action:"rename",id,label:l}),"Renamed")}
+function removeP(id){if(confirm("Remove this student with all its data (timetable copies, homework ticks, plan, WebUntis key, Parent link)? This can't be undone."))run(()=>api("/api/space/profiles",{action:"remove",id}),"Removed")}
+function newpw(n){const p=prompt("New password for "+n+":");if(p)run(()=>api("/api/space/accounts/password",{name:n,password:p}),"Password changed")}
+function endDate(n){const d=prompt("The account works until (YYYY-MM-DD, empty = no end date):","");if(d!==null)run(()=>api("/api/space/accounts/limits",{name:n,expires:d.trim()}),"Saved")}
+function delP(n,role){const keep=role==="student"&&confirm("Also delete this student's data (timetable copies, ticks, key, Parent link)?\n\nOK = delete the data too, Cancel = keep the data and remove only the login.");
+  if(confirm("Delete the account "+n+"?"))run(()=>api("/api/space/accounts/delete",{name:n,delete_profile:keep}),"Deleted")}
+function addAcc(){const role=$("#ar").value;run(()=>api("/api/space/accounts",{name:$("#an").value,password:$("#ap").value,role,label:$("#at")?$("#at").value:"",profiles:[...document.querySelectorAll(".pk:checked")].map(i=>i.value)}),"Created").then(()=>{tab="People"})}
+async function chPw(){try{await api("/api/password",{current:$("#pc").value,new:$("#pn").value});say("Changed - signing you out…");setTimeout(()=>location.href="/",1200)}catch(e){say(e.message,false)}}
+load().catch(()=>{});
+</script></body></html>

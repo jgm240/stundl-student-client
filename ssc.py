@@ -589,7 +589,7 @@ def cmd_gradecalc(a):
 
 # ------------------------------------------------------------------ Parent mode
 PARENT_PORT = 8766
-_PFAILS, _PCACHE = {}, {"t": 0.0, "v": ""}
+_PFAILS, _PCACHE = {}, {}                      # _PCACHE: profile id -> (time, JSON)
 
 
 def parent_port():
@@ -638,9 +638,16 @@ def parent_status():
 
 
 def parent_data():
-    if time.time() - _PCACHE["t"] > 15:
-        _PCACHE.update(t=time.time(), v=json.dumps(core.parent_state()))
-    return _PCACHE["v"]
+    """The Parent JSON of the current profile (cached 15 s per profile)."""
+    pid = core.profile_id()
+    hit = _PCACHE.get(pid)
+    if not hit or time.time() - hit[0] > 15:
+        hit = _PCACHE[pid] = (time.time(), json.dumps(core.parent_state()))
+    return hit[1]
+
+
+def pcache_reset():
+    _PCACHE.clear()
 
 
 def make_parent_handler():
@@ -675,11 +682,11 @@ def make_parent_handler():
             if len(_PFAILS[ip]) >= 15:
                 return self.reply(429, "slow down")
             m = re.fullmatch(r"/p/([A-Za-z0-9_-]{20,64})(/|/wall/?|/data\.json)", urlparse(self.path).path)
-            tok = core.parent_token_peek().encode()
-            need_long = str(core.config().get("links_long", "")).lower() in ("1", "true", "yes", "on")
-            if not m or not tok or (need_long and len(tok) < 64) or not secrets.compare_digest(m.group(1).encode(), tok):
+            owner = core.parent_token_owner(m.group(1)) if m else None
+            if not owner:
                 _PFAILS[ip].append(now)
                 return self.reply(404, "not found")
+            core.set_profile(owner)                                      # this link shows this profile and nothing else
             if core.parent_link_expiry()[0]:
                 return self.reply(410, "This link has expired. Ask for a new one.")
             if m.group(2) == "/data.json":
@@ -718,7 +725,7 @@ def cmd_parent(a):
         srv.serve_forever()
     elif a.action == "rotate":
         core.parent_token(rotate=True)
-        _PCACHE["t"] = 0
+        pcache_reset()
         print("New link created - the old one no longer works.")
         for u in parent_urls():
             print("  browser:", u["browser"]); print("  wall:   ", u["wall"])
@@ -1012,12 +1019,12 @@ def make_handler(port=None):
             elif path == "/api/parent/remove":
                 parent_remove()
             elif path == "/api/parent/rotate":
-                core.parent_token(rotate=True); _PCACHE["t"] = 0
+                core.parent_token(rotate=True); pcache_reset()
             elif path == "/api/parent/sections":
                 chosen = [x for x in core.PARENT_SECTIONS if x in [str(v) for v in body.get("sections", [])]]
                 if not chosen:
                     return self.send(400, json.dumps({"error": "pick at least one section"}))
-                core.save_config({**core.config(), "parent_sections": ",".join(chosen)}); _PCACHE["t"] = 0
+                core.save_config({**core.config(), "parent_sections": ",".join(chosen)}); pcache_reset()
             elif path == "/api/browser":
                 if str(body.get("browser")) not in {b["id"] for b in available_browsers()}:
                     return self.send(400, json.dumps({"error": "unknown browser"}))
