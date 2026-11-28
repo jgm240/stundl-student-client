@@ -404,12 +404,18 @@ function setUiCookie(ui) {
   try { root.document.cookie = "ssc_ui=" + ui + "; Path=/; Max-Age=31536000; SameSite=Lax"; } catch (e) { /* cookies off */ }
 }
 
+/* A choice of interface that the server may not have heard of yet (the request can be cut off by the reload that follows - iOS Safari does that).
+   Until the server confirmed it, it wins over whatever the server still says. */
+function pendingUi() { return store(true, "ssc-ui-pending") || ""; }
+function clearPendingUi(ui) { try { if (!ui || pendingUi() === ui) root.localStorage.removeItem("ssc-ui-pending"); } catch (e) { /* private mode */ } }
+
 /* the page that was served must match the chosen interface; one reload at most per tab (no loops) */
 function ensureInterface() {
   if (!root.document || !prefs.ui) return;
   var shown = root.SSC_CLASSIC ? "classic" : "beta";
   if (prefs.ui === shown) { setUiCookie(prefs.ui); return; }
-  var done = store(true, "ssc-ui-reload");
+  var done = null;
+  try { done = root.sessionStorage.getItem("ssc-ui-reload"); } catch (e) { return; }      // no session storage: never risk a reload loop
   setUiCookie(prefs.ui);
   if (done === prefs.ui) return;
   try { root.sessionStorage.setItem("ssc-ui-reload", prefs.ui); } catch (e) { return; }
@@ -431,7 +437,14 @@ function setPrefs(patch, opts) {
     save();
   }
   listeners.forEach(function (f) { try { f(prefs); } catch (e) { /* a page callback must not break the others */ } });
-  if (uiChanged && (!opts || !opts.silent)) { try { root.sessionStorage.removeItem("ssc-ui-reload"); } catch (e) { /* private mode */ } setUiCookie(prefs.ui); setTimeout(function () { root.location.reload(); }, 400); }
+  if (uiChanged && (!opts || !opts.silent)) {
+    try { root.sessionStorage.removeItem("ssc-ui-reload"); } catch (e) { /* private mode */ }
+    store(false, "ssc-ui-pending", prefs.ui);
+    setUiCookie(prefs.ui);
+    var reloaded = false, go = function () { if (!reloaded) { reloaded = true; root.location.reload(); } };
+    saveNow().then(go, go);                                       // reload only once the server has the choice (or after a short wait)
+    setTimeout(go, UI_SAVE_WAIT);
+  }
 }
 
 var saveTimer = null;
@@ -439,18 +452,37 @@ var saveTimer = null;
    request as a failed guess of the secret link, so it must never be asked. */
 function remoteOk() { return !!(root.document && root.SSC_PREFS_API === true && root.fetch && !root.__SNAPSHOT__ && root.location.protocol !== "file:"); }
 
+var UI_SAVE_WAIT = 2500;                                        // ms: how long a change of interface waits for the server before reloading anyway
+
+function post() {                                               // -> a promise that settles when the request did; never rejects
+  var sent = prefs.ui;
+  try {
+    return root.fetch("/api/prefs", { method: "POST", keepalive: true, headers: { "Content-Type": "application/json" }, body: JSON.stringify(clean(prefs)) })
+      .then(function (r) { if (r && r.ok) clearPendingUi(sent); }, function () {});
+  } catch (e) { return Promise.resolve(); }                     // offline
+}
+
+function saveNow() {                                            // at once, no delay
+  if (!remoteOk()) { clearPendingUi(); return Promise.resolve(); }
+  clearTimeout(saveTimer);
+  return post();
+}
+
 function save() {                                               // best effort: the page may have no server (offline copy, demo)
   if (!remoteOk()) return;
   clearTimeout(saveTimer);
-  saveTimer = setTimeout(function () {
-    try { root.fetch("/api/prefs", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(clean(prefs)) }).catch(function () {}); } catch (e) { /* offline */ }
-  }, 300);
+  saveTimer = setTimeout(post, 300);
 }
 
 function loadRemote() {
   if (!remoteOk()) return;
   root.fetch("/api/prefs", { cache: "no-store" }).then(function (r) { return r.ok ? r.json() : null; }).then(function (p) {
-    if (p && Object.keys(clean(p)).length) { setPrefs(clean(p), { silent: true, retranslate: true }); store(false, KEY, JSON.stringify(prefs)); ensureInterface(); }
+    if (!p) return;
+    var patch = clean(p), pend = pendingUi(), resend = false;
+    if (pend && patch.ui !== pend) { patch.ui = pend; resend = true; }      // the server has not heard of the newest choice yet: ours wins, and it is told again
+    if (Object.keys(patch).length) { setPrefs(patch, { silent: true, retranslate: true }); store(false, KEY, JSON.stringify(prefs)); }
+    if (resend) save();
+    ensureInterface();
   }).catch(function () {});
 }
 
@@ -602,7 +634,7 @@ if (root.document) {
     var mq = root.matchMedia("(prefers-color-scheme: dark)");
     (mq.addEventListener ? mq.addEventListener.bind(mq, "change") : mq.addListener.bind(mq))(function () { if (prefs.theme === "system" || !prefs.theme) { applyAppearance(); listeners.forEach(function (f) { f(prefs); }); } });
   }
-  var ready = function () { translateAll(); startObserver(); ensureInterface(); loadRemote(); };
+  var ready = function () { translateAll(); startObserver(); if (remoteOk()) loadRemote(); else ensureInterface(); };
   if (root.document.readyState === "loading") root.document.addEventListener("DOMContentLoaded", ready); else ready();
 }
 if (typeof module !== "undefined" && module.exports) module.exports = API;

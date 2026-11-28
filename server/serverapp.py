@@ -286,7 +286,7 @@ def make_handler():
             if u.path == "/":
                 if not s:
                     return self.html(200, _page("login.html", prefs_api=False))
-                classic = core.ui_choice(self.headers.get("Cookie", "")) == "classic"
+                classic = self.ui_for(s) == "classic"
                 if s["role"] in ("admin", "student") and not s.get("anon"):                      # the full app (a space administrator / student: for their own profiles)
                     return self.html(200, self.chrome(_page("index.html", classic=classic), s, True))
                 return self.html(200, self.chrome(_page("parent.html", classic=classic), s, False))
@@ -340,6 +340,15 @@ def make_handler():
                 return self.admin_get(u, s)
             return super().do_GET()
 
+        def ui_for(self, s):
+            """Beta or Classic for this request. A signed-in account's saved choice decides (it follows the person to every browser, and a cookie that
+            a script could not set - or Safari dropped - can't disagree with it); everybody else gets what the cookie says."""
+            if s and not s.get("anon"):
+                saved = auth.get_prefs(s["name"]).get("ui")
+                if saved in core.PREF_UIS:
+                    return saved
+            return core.ui_choice(self.headers.get("Cookie", ""))
+
         def chrome(self, page, s, admin):
             import html as _html
             allowed = allowed_profiles(s)
@@ -349,9 +358,11 @@ def make_handler():
                 opts = "".join(f"<option value='{_html.escape(p)}'{' selected' if p == core.profile_id() else ''}>{_html.escape(labels.get(p, p))}</option>" for p in allowed)
                 pick = ("<select aria-label='Child' translate='no' style='font:13px system-ui;border-radius:99px;border:0;padding:3px 8px' "
                         "onchange=\"document.cookie='ssc_profile='+this.value+'; Path=/; SameSite=Strict';location.reload()\">" + opts + "</select>")
-            bar = ("<div style='position:fixed;z-index:99;right:12px;bottom:12px;font:13px system-ui;background:rgba(20,24,38,.88);color:#fff;"
+            bar = ("<style>@media(max-width:900px){#sscbar{bottom:calc(78px + env(safe-area-inset-bottom)) !important;right:8px !important;font-size:12px !important;"
+                   "padding:5px 11px !important;gap:9px !important;max-width:calc(100vw - 16px)}#sscbar span.nm{display:none}}</style>"
+                   "<div id='sscbar' style='position:fixed;z-index:99;right:12px;bottom:12px;font:13px system-ui;background:rgba(20,24,38,.88);color:#fff;"
                    "padding:7px 12px;border-radius:99px;display:flex;gap:12px;align-items:center'>" + pick +
-                   f"<span>{'Admin' if is_global(s) else s['role'].title()}: {re.sub('[<>&]', '', s['name'])}</span>"
+                   f"<span class='nm'>{'Admin' if is_global(s) else s['role'].title()}: {re.sub('[<>&]', '', s['name'])}</span>"
                    + ("<a style='color:#9db4ff' href='/admin'>Admin panel</a>" if is_global(s) else "")
                    + ("<a style='color:#9db4ff' href='/space'>My space</a>" if is_scoped(s) and s["role"] in ("admin", "student") else "")
                    + "<a style='color:#9db4ff' href='#' onclick=\"fetch('/api/logout',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}).then(()=>location.href='/')\">Log out</a></div>")
@@ -396,7 +407,9 @@ def make_handler():
                     return self.j(415, {"error": "json only"})
                 if s.get("anon"):                      # the shared passwordless guest has nobody's settings to keep
                     return self.j(200, {"saved": False})
-                return self.j(200, {"saved": True, "prefs": auth.set_prefs(s["name"], b)})
+                saved = auth.set_prefs(s["name"], b)
+                extra = {"Set-Cookie": f"ssc_ui={saved['ui']}; Path=/; Max-Age=31536000; SameSite=Lax"} if saved.get("ui") in core.PREF_UIS else None
+                return self.j(200, {"saved": True, "prefs": saved}, extra)
             if u.path == "/api/logout":
                 m = re.search(r"ssc_sess=([A-Za-z0-9_-]+)", self.headers.get("Cookie", ""))
                 auth.logout(m.group(1) if m else None)

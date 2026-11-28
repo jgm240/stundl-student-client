@@ -1,4 +1,4 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Stundl Student Client</title>
 <meta name="color-scheme" content="light dark">
 <!--SSC-UI-->
@@ -187,6 +187,35 @@ button:focus-visible,select:focus-visible,input:focus-visible,.tile:focus-visibl
 #main>p.mut:only-child{padding:42px 16px;text-align:center;font-size:15px}
 .bar .sp{flex:1}
 .dash .item.hw>button,.dash .item.hw .hw-top .badge{display:none}.dash .item.hw{padding:11px 14px}
+/* ---------- phones: nothing may be wider than the screen, controls are easy to hit, and iOS Safari must not zoom in on a field ---------- */
+@media(max-width:900px){
+  html,body{max-width:100%;overflow-x:hidden}
+  #top{flex-wrap:wrap;gap:8px;padding:calc(10px + env(safe-area-inset-top)) 14px 10px}
+  #top h1{flex:1 1 100%;min-width:0;margin:0;font-size:22px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  #top .sp{display:none}
+  #exp{flex:1 1 0;min-width:0;max-width:none}
+  #sync{white-space:nowrap}
+  #banner{margin:0 14px}
+  main{padding:4px 14px calc(104px + env(safe-area-inset-bottom));overflow-wrap:anywhere}
+  #side{padding-left:calc(8px + env(safe-area-inset-left));padding-right:calc(8px + env(safe-area-inset-right))}
+  select,input[type=search],input[type=text],input[type=date],input[type=time],input[type=number],input[type=password],textarea{font-size:16px;min-height:42px;max-width:100%}
+  button{min-height:40px}
+  #tabs button{min-height:0}
+  main .bar>*,main .row>*,.item>*,.lrow>*,.kv>*,.hw-top>*{min-width:0}
+  main .row,.kv{flex-wrap:wrap}
+  .bar select,.bar input[type=search],.bar input[type=text]{flex:1 1 150px}
+  table{display:block;max-width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}
+  .subj{max-width:100%}
+  .item.hw{flex-wrap:wrap;row-gap:8px}                 /* the text gets the whole width; the buttons go below it */
+  .item.hw>.b{flex:1 1 calc(100% - 42px)}
+  .item.hw>button{margin-left:32px}.item.hw>button+button{margin-left:0}
+  .dash .item.hw>.b{flex-basis:0}
+  .hero-card{padding:20px 18px;gap:14px}.hero-card .hello h3{font-size:23px}.hero-card .nowbox b{font-size:26px}
+  .tiles{grid-template-columns:1fr 1fr}.tile{padding:12px 14px}.tile b{font-size:24px}
+  .lrow{flex-wrap:wrap;row-gap:4px}.lrow .t{width:auto;min-width:78px}
+  .drawer{padding:20px 18px calc(36px + env(safe-area-inset-bottom))}
+}
+@media(max-width:380px){.tiles{grid-template-columns:1fr}#top h1{font-size:20px}}
 </style></head><body>
 <div id="app">
 <aside id="side">

@@ -947,6 +947,37 @@ class WebTests(unittest.TestCase):
         self.assertEqual(self.u.req("GET", "/data.json")[0], 401)
         self.assertEqual(Client(self.port).login("anna", "longenoughpw"), 401)
 
+    def test_the_accounts_saved_interface_decides_the_page(self):
+        """The page comes from the account's saved choice, not from a cookie a script may not have been able to set (iOS Safari)."""
+        def page(client, cookie=""):
+            client.extra = cookie
+            return client.req("GET", "/")[1]
+        classic = lambda html: "window.SSC_CLASSIC=true" in html
+        auth.set_prefs("anna", {"ui": "classic"})
+        self.assertTrue(classic(page(self.u, "ssc_ui=beta")))                              # the account says classic: classic, whatever the cookie says
+        auth.set_prefs("anna", {"ui": "beta"})
+        self.assertFalse(classic(page(self.u, "ssc_ui=classic")))                         # ... and the other way round
+        self.assertTrue(classic(page(self.a, "ssc_ui=classic")))                          # no saved choice: the cookie decides, as before
+        self.assertFalse(classic(page(self.a, "")))
+        self.assertFalse(classic(page(self.g, "ssc_ui=beta")))
+        self.assertTrue(classic(page(self.g, "ssc_ui=classic")))
+        self.u.extra = self.a.extra = self.g.extra = ""
+        auth.set_prefs("anna", {"ui": "beta"})
+
+    def test_saving_the_interface_also_sets_the_cookie_from_the_server(self):
+        c = http.client.HTTPConnection("127.0.0.1", self.port, timeout=10)
+        c.request("POST", "/api/prefs", json.dumps({"ui": "classic", "lang": "de"}), {"Content-Type": "application/json", "Cookie": self.u.cookie})
+        r = c.getresponse()
+        r.read()
+        self.assertEqual(r.status, 200)
+        self.assertIn("ssc_ui=classic", r.getheader("Set-Cookie") or "")
+        c = http.client.HTTPConnection("127.0.0.1", self.port, timeout=10)
+        c.request("POST", "/api/prefs", json.dumps({"lang": "fr"}), {"Content-Type": "application/json", "Cookie": self.u.cookie})
+        r = c.getresponse()
+        r.read()
+        self.assertIn("ssc_ui=classic", r.getheader("Set-Cookie") or "")                   # the stored choice is repeated, never lost
+        auth.set_prefs("anna", {"ui": "beta"})
+
     def test_switcher_appears_only_when_there_is_a_choice(self):
         s, page = self.a.req("GET", "/")
         self.assertIn("ssc_profile=", page)

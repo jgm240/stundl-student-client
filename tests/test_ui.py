@@ -158,5 +158,121 @@ class PageTests(unittest.TestCase):
         self.assertEqual(core.clean_prefs("lang=de"), {})
 
 
+class PhoneLayoutTests(unittest.TestCase):
+    """The Beta UI on a phone (checked in a real browser at 375 px: no page wider than the screen). These keep the rules from being lost."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.page = (ROOT / "index.html").read_text(encoding="utf-8")
+
+    def test_the_phone_rules_are_there(self):
+        css = self.page[self.page.index("/* ---------- phones"):self.page.index("</style></head>")]
+        for rule in ("#top{flex-wrap:wrap", "font-size:16px", "overflow-x:hidden", "table{display:block", ".item.hw{flex-wrap:wrap", "env(safe-area-inset-bottom)", "min-height:40px"):
+            self.assertIn(rule, css, rule)
+        self.assertIn("@media(max-width:900px)", css)
+
+    def test_the_page_can_use_the_whole_screen(self):
+        self.assertIn("viewport-fit=cover", self.page)                       # safe-area insets (notch, home bar) only work with this
+        self.assertIn("width=device-width", self.page)
+
+    def test_the_account_bar_of_the_server_does_not_cover_the_tab_bar(self):
+        src = (ROOT / "server/serverapp.py").read_text(encoding="utf-8")
+        self.assertIn("#sscbar{bottom:calc(78px + env(safe-area-inset-bottom))", src)
+
+
+FAKE_BROWSER = r"""
+// a tiny stand-in for a browser: cookies, local/session storage, fetch, reload - enough to run ui.js's choice of interface
+function makeWindow(opts) {
+  const mem = () => { const m = {}; return { getItem: k => (k in m ? m[k] : null), setItem: (k, v) => { m[k] = String(v); }, removeItem: k => { delete m[k]; }, _m: m }; };
+  const w = { localStorage: opts.local || mem(), sessionStorage: opts.session || mem(), SSC_PREFS_API: true, SSC_CLASSIC: !!opts.classic,
+              location: { protocol: "http:", reload() { w.reloads++; } }, reloads: 0, posts: [], gets: 0, cookies: [],
+              navigator: { language: "en" }, document: { readyState: "complete", title: "t", body: null, documentElement: { style: { setProperty() {}, removeProperty() {} }, setAttribute() {} } } };
+  Object.defineProperty(w.document, "cookie", { set(v) { w.cookies.push(v); }, get() { return ""; } });
+  w.fetch = (url, o) => {
+    if (o && o.method === "POST") {
+      w.posts.push({ body: JSON.parse(o.body), keepalive: !!o.keepalive });
+      return opts.postHangs ? new Promise(() => {}) : Promise.resolve({ ok: opts.postOk !== false });
+    }
+    w.gets++;
+    return Promise.resolve({ ok: true, json: () => Promise.resolve(opts.remote || {}) });
+  };
+  return w;
+}
+const UI_PATH = @UI@;
+function load(w) { delete require.cache[require.resolve(UI_PATH)]; global.window = w; return require(UI_PATH); }
+const tick = (ms) => new Promise(r => setTimeout(r, ms || 20));
+"""
+
+
+@unittest.skipUnless(NODE, "Node.js is not installed")
+class InterfaceChoiceTests(unittest.TestCase):
+    """Switching between Beta and Classic - including the way iOS Safari broke it: it cancels a request that is still on its way when the page
+    reloads, so the server never heard of the choice and the next page load took the old one back."""
+
+    def run_js(self, body):
+        code = FAKE_BROWSER.replace("@UI@", json.dumps(str(ROOT / "ui.js"))) + "(async () => {" + body + "})().catch(e => { console.error(e); process.exit(1); });"
+        return json.loads(node(code))
+
+    def test_the_server_hears_of_the_choice_before_the_page_reloads(self):
+        out = self.run_js("""
+          const w = makeWindow({ classic: true }); const u = load(w); await tick();
+          u.set({ ui: "beta" });
+          const early = { posts: w.posts.length, reloads: w.reloads, pending: w.localStorage.getItem("ssc-ui-pending") };   // right away: sent, not reloaded yet
+          await tick(60);
+          console.log(JSON.stringify({ early, posts: w.posts, reloads: w.reloads, pending: w.localStorage.getItem("ssc-ui-pending"), cookie: w.cookies.filter(c => c.startsWith("ssc_ui=")).pop() }));""")
+        self.assertEqual(out["early"], {"posts": 1, "reloads": 0, "pending": "beta"})        # no 300 ms delay, no reload before the request is done
+        self.assertEqual(out["posts"][0]["body"]["ui"], "beta")
+        self.assertTrue(out["posts"][0]["keepalive"])
+        self.assertEqual(out["reloads"], 1)
+        self.assertIsNone(out["pending"])                                                      # confirmed by the server: no longer pending
+        self.assertIn("ssc_ui=beta", out["cookie"])
+
+    def test_a_stale_server_value_does_not_undo_a_choice_the_server_missed(self):
+        # iPhone: the POST was cut off by the reload. The page that now loads is Beta (cookie), the server still says classic.
+        local = """const local = { m: { "ssc-ui-pending": "beta", "ssc-prefs": JSON.stringify({ ui: "beta" }) }, getItem(k) { return k in this.m ? this.m[k] : null; }, setItem(k, v) { this.m[k] = String(v); }, removeItem(k) { delete this.m[k]; } };"""
+        out = self.run_js(local + """
+          const w = makeWindow({ classic: false, local, remote: { ui: "classic", lang: "de" } }); const u = load(w); await tick(500);                       // the re-send is debounced (300 ms)
+          console.log(JSON.stringify({ ui: u.prefs().ui, lang: u.prefs().lang, reloads: w.reloads, posts: w.posts.map(p => p.body.ui), pending: local.getItem("ssc-ui-pending") }));""")
+        self.assertEqual(out["ui"], "beta")                                                    # our choice wins
+        self.assertEqual(out["lang"], "de")                                                    # everything else still comes from the server
+        self.assertEqual(out["reloads"], 0)                                                    # no switching back
+        self.assertEqual(out["posts"], ["beta"])                                               # and the server is told again
+        self.assertIsNone(out["pending"])
+
+    def test_without_a_pending_choice_the_server_wins_once(self):
+        out = self.run_js("""
+          const session = (() => { const m = {}; return { getItem: k => (k in m ? m[k] : null), setItem: (k, v) => { m[k] = String(v); }, removeItem: k => { delete m[k]; } }; })();
+          const w = makeWindow({ classic: false, session, remote: { ui: "classic" } }); load(w); await tick(60);
+          const first = w.reloads;
+          const w2 = makeWindow({ classic: false, session, remote: { ui: "classic" } }); load(w2); await tick(60);          // the same tab after the reload, server still says classic
+          console.log(JSON.stringify({ first, second: w2.reloads }));""")
+        self.assertEqual(out, {"first": 1, "second": 0})                                       # one reload at most per tab: never a loop
+
+    def test_no_session_storage_means_no_reload(self):
+        out = self.run_js("""
+          const bad = { getItem() { throw new Error("blocked"); }, setItem() { throw new Error("blocked"); }, removeItem() {} };
+          const w = makeWindow({ classic: false, session: bad, remote: { ui: "classic" } }); load(w); await tick(60);
+          console.log(JSON.stringify({ reloads: w.reloads }));""")
+        self.assertEqual(out["reloads"], 0)
+
+    def test_when_the_server_does_not_answer_the_page_reloads_anyway(self):
+        out = self.run_js("""
+          const w = makeWindow({ classic: true, postHangs: true }); const u = load(w); await tick();
+          u.set({ ui: "beta" }); await tick(100);
+          const before = w.reloads;
+          await tick(2600);
+          console.log(JSON.stringify({ before, after: w.reloads, pending: w.localStorage.getItem("ssc-ui-pending") }));""")
+        self.assertEqual((out["before"], out["after"]), (0, 1))                                # waits a little, then reloads
+        self.assertEqual(out["pending"], "beta")                                               # still pending: the next page load tells the server again
+
+    def test_pages_without_a_server_use_the_cookie_only(self):
+        out = self.run_js("""
+          const w = makeWindow({ classic: true }); w.SSC_PREFS_API = false; const u = load(w); await tick();
+          u.set({ ui: "beta" }); await tick(60);
+          console.log(JSON.stringify({ posts: w.posts.length, gets: w.gets, reloads: w.reloads, cookie: w.cookies.filter(c => c.startsWith("ssc_ui=")).pop() }));""")
+        self.assertEqual((out["posts"], out["gets"], out["reloads"]), (0, 0, 1))               # the Parent link server is never asked (that would count as a wrong guess)
+        self.assertIn("ssc_ui=beta", out["cookie"])
+
+
 if __name__ == "__main__":
     unittest.main()
