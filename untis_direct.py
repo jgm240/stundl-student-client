@@ -210,47 +210,127 @@ def resolve_subject(v, table):
     return str(v)
 
 
-ELEMENT_TYPES = {"kl": 1, "te": 2, "su": 3, "ro": 4}          # WebUntis element types: class, teacher, subject, room
+ELEMENT_TYPES = {"kl": (1, "CLASS"), "te": (2, "TEACHER"), "su": (3, "SUBJECT"), "ro": (4, "ROOM")}    # WebUntis element types, as number or as word
 
 
 def _refs(p, key):
-    """The class / teacher / subject / room references of a period - either as the old fields (kl, te, su, ro) or, as the Untis Mobile
-    timetable sends them, as one list `elements` with a type number each."""
+    """The class / teacher / subject / room references of a period - the old fields (kl, te, su, ro), or the list `elements` whose entries
+    name their type as a number (1-4) or as a word (CLASS, TEACHER, SUBJECT, ROOM, as the Untis Mobile timetable sends it)."""
     if p.get(key):
         return p[key]
-    return [e for e in p.get("elements") or [] if isinstance(e, dict) and e.get("type") in (ELEMENT_TYPES[key], str(ELEMENT_TYPES[key]))]
+    num, word = ELEMENT_TYPES[key]
+    return [e for e in p.get("elements") or [] if isinstance(e, dict) and (e.get("type") in (num, str(num)) or str(e.get("type", "")).upper() == word)]
+
+
+def _flags(p):
+    """What the period says about itself: the list `is` (["REGULAR"], ["CANCELLED"] ...), the old cellState, element states."""
+    out = {str(x).upper() for x in (p.get("is") if isinstance(p.get("is"), list) else [])}
+    if p.get("cellState"):
+        out.add(str(p["cellState"]).upper())
+    out |= {str(e.get("state", "")).upper() for e in p.get("elements") or [] if isinstance(e, dict) and e.get("state")}
+    return out
 
 
 def _period_state(p):
-    state = str(p.get("cellState", "")).upper()
-    states = {str(e.get("state", "")).upper() for e in p.get("elements") or [] if isinstance(e, dict)}
-    if state in ("CANCEL", "CANCELLED", "CANCELED") or (not state and "CANCEL" in states):
+    flags = _flags(p)
+    if flags & {"CANCEL", "CANCELLED", "CANCELED"}:
         return "CANCELLED"
-    if "SUBST" in state or state in ("ADDITIONAL", "ROOMSUBSTITUTION") or (not state and states & {"SUBSTITUTION", "ADDED"}):
+    if any("SUBST" in f or f in ("ADDITIONAL", "ADDED", "CHANGED", "ROOMSUBSTITUTION") for f in flags):
         return "CHANGED"
     return "REGULAR"
 
 
-def periods_to_days(result, master, lessons=None):
+_DT = __import__("re").compile(r"(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})")
+
+
+def _split_dt(v, utc=False):
+    """'2026-11-23T08:00' / '2026-11-23T08:00Z' -> ('2026-11-23', '08:00'). A Z is kept as local school time unless `utc` says the times really are
+    UTC (see _times_are_utc): then they are converted to this machine's time zone."""
+    s = str(v or "")
+    m = _DT.match(s)
+    if not m:
+        raise ValueError("no date-time")
+    if utc and s.endswith("Z"):
+        from datetime import datetime, timezone
+        dt = datetime(int(m.group(1)), int(m.group(2)), int(m.group(3)), int(m.group(4)), int(m.group(5)), tzinfo=timezone.utc).astimezone()
+        return dt.strftime("%Y-%m-%d"), dt.strftime("%H:%M")
+    return f"{m.group(1)}-{m.group(2)}-{m.group(3)}", f"{m.group(4)}:{m.group(5)}"
+
+
+def _grid_starts(master):
+    """The lesson start times of the school's time grid ('08:00' ...), from the master data."""
+    out = set()
+    for d in ((master or {}).get("timeGrid") or {}).get("days") or []:
+        for un in d.get("units") or []:
+            m = __import__("re").search(r"(\d{2}):?(\d{2})", str(un.get("startTime", "")))
+            if m:
+                out.add(f"{m.group(1)}:{m.group(2)}")
+    return out
+
+
+def _times_are_utc(periods, master):
+    """Do the Z-times of the periods only fit the school's time grid after converting from UTC? (WebUntis is not consistent about the Z.)"""
+    grid = _grid_starts(master)
+    zs = [p["startDateTime"] for p in periods if isinstance(p, dict) and str(p.get("startDateTime", "")).endswith("Z")]
+    if not grid or not zs:
+        return False
+    def hits(utc):
+        n = 0
+        for v in zs[:60]:
+            try:
+                n += _split_dt(v, utc)[1] in grid
+            except ValueError:
+                pass
+        return n
+    return hits(True) > hits(False)
+
+
+def _text(p, key, old):
+    """A text of a period: p['text'] is an object {lesson, substitution, info} in the new form, the fields lstext / substText in the old one."""
+    tx = p.get("text")
+    if isinstance(tx, dict):
+        return str(tx.get(key) or "")
+    return str(p.get(old) or "")
+
+
+def periods_to_days(result, master, lessons=None, problems=None):
     tabs = {k: _lookup(master, k) for k in ("subjects", "teachers", "rooms", "klassen")}
-    days = {}
-    for p in (result.get("timetable") or result).get("periods") or []:
+    days, skipped = {}, 0
+    periods = (result.get("timetable") or result).get("periods") or []
+    utc = _times_are_utc(periods, master)
+    for p in periods:
         try:
-            d = _iso(p["date"])
+            if "date" in p and "startTime" in p:
+                d = _iso(p["date"])
+                start, end = f"{d}T{_hhmm(p['startTime'])}", f"{d}T{_hhmm(p['endTime'])}"
+            else:
+                d, st = _split_dt(p["startDateTime"], utc)
+                d2, et = _split_dt(p["endDateTime"], utc)
+                start, end = f"{d}T{st}", f"{d2}T{et}"
             su = _refs(p, "su")
             lid = p.get("lessonId") or p.get("lid")
             if lessons is not None and lid and su:
                 sub = tabs["subjects"].get((su[0] or {}).get("id"), {})
                 lessons.setdefault(lid, sub.get("name") or sub.get("longName") or "")
             days.setdefault(d, []).append({
-                "duration": {"start": f"{d}T{_hhmm(p['startTime'])}", "end": f"{d}T{_hhmm(p['endTime'])}"}, "status": _period_state(p),
-                "type": "NORMAL_TEACHING_PERIOD", "lessonText": p.get("lstext") or p.get("lessonText") or "", "substitutionText": p.get("substText") or "",
-                "notesAll": p.get("periodText") or p.get("periodInfo") or p.get("info") or "", "position1": _items(_refs(p, "kl"), tabs["klassen"], "CLASS"),
+                "duration": {"start": start, "end": end}, "status": _period_state(p),
+                "type": "NORMAL_TEACHING_PERIOD", "lessonText": _text(p, "lesson", "lstext") or str(p.get("lessonText") or ""),
+                "substitutionText": _text(p, "substitution", "substText"),
+                "notesAll": _text(p, "info", "periodText") or str(p.get("periodInfo") or ""), "position1": _items(_refs(p, "kl"), tabs["klassen"], "CLASS"),
                 "position2": _items(_refs(p, "te"), tabs["teachers"], "TEACHER"), "position3": _items(su, tabs["subjects"], "SUBJECT"),
                 "position4": _items(_refs(p, "ro"), tabs["rooms"], "ROOM")})
-        except (KeyError, ValueError, TypeError):
-            continue
+        except (KeyError, ValueError, TypeError, AttributeError):
+            skipped += 1
+    if skipped and problems is not None:
+        problems.append(f"timetable: {skipped} lesson(s) could not be read (run: ssconfig untis shape getTimetable2017)")
     return {"days": [{"date": d, "gridEntries": sorted(g, key=lambda e: e["duration"]["start"])} for d, g in sorted(days.items())]}
+
+
+def _int(v):
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return v
 
 
 def _exam_date(e):
@@ -287,7 +367,7 @@ def fetch(cfg, today=None, weeks_back=1, weeks_ahead=4, post=None):
         try:
             res = call(cfg, "getTimetable2017", {**elem, "startDate": int(start.strftime("%Y%m%d")),
                                                   "endDate": int((start + timedelta(days=6)).strftime("%Y%m%d"))}, post=post)
-            out["timetable"][start.isoformat()] = periods_to_days(res, master, lesson_subject)
+            out["timetable"][start.isoformat()] = periods_to_days(res, master, lesson_subject, notes)
         except AuthError:
             raise
         except UntisError as e:
@@ -296,7 +376,11 @@ def fetch(cfg, today=None, weeks_back=1, weeks_ahead=4, post=None):
     try:
         r = call(cfg, "getHomeWork2017", span, post=post)
         hw = r.get("homeWorks") or r.get("homeworks") or r.get("homework") or []
-        given = {l.get("id"): resolve_subject(l.get("subject") or l.get("subjectId") or l.get("su"), subjects) for l in r.get("lessons", [])}
+        given = {l.get("id"): resolve_subject(l.get("subject") or l.get("subjectId") or l.get("su"), subjects) for l in r.get("lessons") or [] if isinstance(l, dict)}
+        by_id = r.get("lessonsById") or {}                                          # the Untis Mobile form: {"72111": {"id": 72111, "subjectId": 7, ...}}
+        for k, l in (by_id.items() if isinstance(by_id, dict) else []):
+            if isinstance(l, dict):
+                given.setdefault(l.get("id") if l.get("id") is not None else _int(k), resolve_subject(l.get("subject") or l.get("subjectId") or l.get("su"), subjects))
         lessons, items, unknown = {}, [], 0
         for h in hw:
             lid = h.get("lessonId")
@@ -305,8 +389,8 @@ def fetch(cfg, today=None, weeks_back=1, weeks_ahead=4, post=None):
                 lid = "hw-" + str(h.get("id"))
             lessons[lid] = subj
             unknown += not subj
-            items.append({"id": h.get("id"), "lessonId": lid, "dueDate": h.get("dueDate") or h.get("date"), "date": h.get("date"), "text": h.get("text", ""),
-                          "remark": h.get("remark", ""), "completed": bool(h.get("completed") or h.get("done"))})
+            items.append({"id": h.get("id"), "lessonId": lid, "dueDate": h.get("dueDate") or h.get("endDate") or h.get("date"), "date": h.get("date") or h.get("startDate"),
+                          "text": h.get("text") or "", "remark": h.get("remark") or "", "completed": bool(h.get("completed") or h.get("done"))})
         out["homework"] = {"data": {"homeworks": items, "lessons": [{"id": k, "subject": v} for k, v in lessons.items()]}}
         if unknown:
             notes.append(f"homework: could not find the subject of {unknown} item(s) (run: ssc untis raw getHomeWork2017 to see what WebUntis sends)")
