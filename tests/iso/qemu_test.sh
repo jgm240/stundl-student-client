@@ -110,7 +110,9 @@ for i in $(seq 1 30); do
   sleep 3
 done
 if [ "$ok" != 1 ]; then echo "HTTPS DID NOT COME UP after turning it on"; exit 1; fi
-curl -ksS -b $W/jar https://127.0.0.1:18080/api/admin/system -o $W/system.json
+# the restart dropped every session (they live in memory): sign in again, over HTTPS this time
+curl -ksSf -c $W/jar3 -H 'Content-Type: application/json' -d "{\"name\":\"admin\",\"password\":\"$PW\"}" https://127.0.0.1:18080/api/login -o /dev/null
+curl -ksSf -b $W/jar3 https://127.0.0.1:18080/api/admin/system -o $W/system.json
 python3 - "$W/system.json" <<'PY'
 import json, sys
 t = json.load(open(sys.argv[1]))["tls"]
