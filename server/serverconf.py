@@ -41,6 +41,7 @@ DEFAULTS = {
              "kinds": ["timetable", "homework", "exam"], "digest": False, "digest_time": "17:00", "alerts": True},
     "health": {"enabled": True, "disk_warn": 85, "disk_crit": 95, "temp_warn": 80, "battery_warn": 15},
     "autoupdate": {"enabled": False, "time": "04:00"},
+    "update": {"channel": "commits"},
     "schedule": {"enabled": False, "off": "22:00", "on": "06:00", "days": list(DAYS), "mode": "quiet", "spin_down_disks": True, "screen_off": True, "stop_ssh": False},
     "wifi": {"enabled": False, "ssid": "", "open": False, "hidden": False, "country": ""},
     "ssh": {"enabled": True, "port": 22, "permit_root": False, "password_auth": True, "allow_users": []},
@@ -275,6 +276,8 @@ def validate(cfg):
     if h["disk_crit"] <= h["disk_warn"]:
         raise ValueError("the 'disk full' limit must be above the 'disk filling up' limit")
 
+    if c["update"]["channel"] not in ("commits", "releases"):
+        raise ValueError("updates: follow 'commits' (every new commit) or 'releases'")
     au = c["autoupdate"]
     au["enabled"] = _bool(au["enabled"])
     au["time"] = str(au["time"]).strip()

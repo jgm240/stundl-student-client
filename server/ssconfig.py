@@ -352,18 +352,25 @@ def cmd_restore(args):
 def cmd_update(args):
     """ssconfig update            check GitHub for a newer release
        ssconfig update --install  install it (needs the network; the web service restarts)
-       ssconfig update --rollback go back to the version that was installed before"""
+       ssconfig update --rollback go back to the version that was installed before
+       ssconfig update --channel commits|releases   follow every new commit (default) or published releases only"""
     import ssc_version
     import updater
     try:
         if "--rollback" in args:
             print("Back to", updater.rollback())
             return 0
+        if "--channel" in args:
+            set_setting("update.channel", args[args.index("--channel") + 1])
+            return 0
         info = updater.check()
-        print(f"Installed: {info['current']}   Latest on GitHub: {info['latest'] or 'unknown'}")
+        print(f"Following: {'every new commit' if info['channel'] == 'commits' else 'releases'}")
+        print(f"Installed: {info['current']}{' (' + info['current_commit'][:7] + ')' if info.get('current_commit') else ''}   Latest on GitHub: {info['latest'] or 'unknown'}")
         if not info["update_available"]:
             print("You're up to date.")
             return 0
+        if info["channel"] == "commits":
+            print(f"New commit: {info['notes']}   (automatic tests: {info['ci']})")
         print("A newer version is available:", info["url"])
         if "--install" not in args:
             print("Install it with:  ssconfig update --install")

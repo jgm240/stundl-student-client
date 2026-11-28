@@ -40,6 +40,9 @@ mkdir -p "$WORK/config/includes.chroot/opt/ssc/assets" "$WORK/config/includes.ch
 for f in menu_model.py tui.py; do [ -f "$f" ] && cp "$f" "$WORK/config/includes.chroot/opt/ssc/" || true; done
 cp server/*.py server/*.html "$WORK/config/includes.chroot/opt/ssc/server/"
 echo "$VERSION" > "$WORK/config/includes.chroot/opt/ssc/VERSION"
+# which commit this image was built from: the updater offers every later commit as an update
+COMMIT_ID=${GITHUB_SHA:-$(git -C "$REPO" rev-parse HEAD 2>/dev/null || true)}
+if echo "$COMMIT_ID" | grep -Eq '^[0-9a-f]{40}$'; then echo "$COMMIT_ID" > "$WORK/config/includes.chroot/opt/ssc/COMMIT"; fi
 cd "$WORK"
 cp "$HERE/hooks/"* config/hooks/normal/
 

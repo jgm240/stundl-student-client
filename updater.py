@@ -1,4 +1,4 @@
-"""Updates SSC from its GitHub releases.
+"""Updates SSC from GitHub: new commits (SSC Server, the default) or published releases.
 
 Nothing here runs by itself: the user presses "Check for updates" (or runs `ssc update`). It only talks to this project's
 repository over HTTPS and every redirect has to stay on GitHub's own hosts.
@@ -8,7 +8,11 @@ repository over HTTPS and every redirect has to stay on GitHub's own hosts.
   SSC Server    installs the release's code into /opt/ssc: staged, compile-checked, import-checked, then swapped in with the old
                 copy kept for a roll-back, and the service restarted
 
+  commits       (SSC Server) a new commit on the main branch IS an update - no release needed. Only a commit whose automatic tests
+                did not fail is installed, and an update that does not start is rolled back by the root helper.
+
 Honest limit: the server update trusts GitHub's TLS and this repository (a source archive has no signature or checksum of its own).
+Following commits means every change that reaches the main branch reaches the servers: only turn that on if you trust this repository's maintainers.
 """
 import fnmatch
 import hashlib
@@ -35,6 +39,10 @@ TRUSTED_HOSTS = ("api.github.com", "github.com", "codeload.github.com", "objects
 UA = "SSC-updater"
 MAX_DOWNLOAD = 1_500_000_000
 _TEST_ALLOW_LOCAL = False          # tests point the updater at a local fake GitHub; never set outside tests
+
+SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+BRANCH = "main"
+CHANNELS = ("commits", "releases")
 
 TAG_OK = re.compile(r"^v\d+\.\d+\.\d+(?:-(?:alpha|beta|rc)\.\d+)?$")
 
@@ -96,13 +104,91 @@ def releases():
     return out
 
 
-def check(current=None, include_prerelease=True):
+def default_channel():
+    """What the server is set to follow. Desktop apps always use releases (they download a file for their system)."""
+    if flavor() != "server":
+        return "releases"
+    try:
+        import serverconf
+        return serverconf.load()["update"]["channel"]
+    except Exception:
+        return "commits"
+
+
+def check(current=None, include_prerelease=True, channel=None):
+    channel = channel or default_channel()
+    if channel == "commits":
+        return check_commits(current)
     cur = current or ssc_version.VERSION
     rels = [r for r in releases() if include_prerelease or not r["prerelease"]]
     latest = rels[0] if rels else None
-    return dict(current=cur, flavor=flavor(), latest=latest["version"] if latest else None, tag=latest["tag"] if latest else None,
+    return dict(current=cur, flavor=flavor(), channel="releases", latest=latest["version"] if latest else None, tag=latest["tag"] if latest else None,
                 update_available=bool(latest and ssc_version.is_newer(latest["tag"], cur)), url=latest["url"] if latest else "",
                 notes=(latest["notes"][:4000] if latest else ""), asset=(pick_asset(latest) or {}).get("name") if latest else None)
+
+
+# ------------------------------------------------------------------ following commits
+def _json(url):
+    with _open(url) as r:
+        return json.loads(r.read().decode("utf-8"))
+
+
+def installed_commit(root=None):
+    """The commit this install was made from ('' if unknown: installed from a release, or an old image)."""
+    try:
+        v = (Path(root or os.environ.get("SSC_SERVER_ROOT", "/opt/ssc")) / "COMMIT").read_text().strip()
+    except OSError:
+        return ""
+    return v if SHA_RE.match(v) else ""
+
+
+def latest_commit():
+    d = _json(f"{api_base()}/repos/{REPO}/commits/{BRANCH}")
+    sha = str(d.get("sha", ""))
+    if not SHA_RE.match(sha):
+        raise UpdateError("GitHub sent something unexpected for the newest commit")
+    c = d.get("commit") or {}
+    return dict(sha=sha, message=str(c.get("message", "")).strip().splitlines()[0][:200] if c.get("message") else "",
+                date=str(((c.get("committer") or {}).get("date")) or ""), url=str(d.get("html_url", "")))
+
+
+def remote_version(sha):
+    """VERSION of ssc_version.py at that commit."""
+    import base64
+    d = _json(f"{api_base()}/repos/{REPO}/contents/ssc_version.py?ref={sha}")
+    try:
+        text = base64.b64decode(str(d.get("content", ""))).decode("utf-8", "replace")
+    except ValueError:
+        text = ""
+    m = re.search(r'^VERSION\s*=\s*"([^"]+)"', text, re.M)
+    if not m:
+        raise UpdateError("could not read the version of the newest commit")
+    return m.group(1)
+
+
+def ci_state(sha):
+    """Result of the repository's automatic tests for that commit: 'passed', 'failed', 'pending' or 'unknown' (nothing ran / no answer)."""
+    try:
+        runs = _json(f"{api_base()}/repos/{REPO}/commits/{sha}/check-runs?per_page=100").get("check_runs") or []
+    except UpdateError:
+        return "unknown"
+    seen = [(r.get("status"), r.get("conclusion")) for r in runs]
+    if any(c in ("failure", "timed_out", "action_required", "startup_failure") for _, c in seen):
+        return "failed"
+    if any(s != "completed" for s, _ in seen):
+        return "pending"
+    return "passed" if any(c == "success" for _, c in seen) else "unknown"
+
+
+def check_commits(current=None):
+    cur = current or ssc_version.VERSION
+    c = latest_commit()
+    ver = remote_version(c["sha"])
+    have = installed_commit()
+    state = ci_state(c["sha"])
+    avail = c["sha"] != have if have else True                  # unknown origin (a release install): offer it once; afterwards the commit is known
+    return dict(current=cur, current_commit=have, flavor=flavor(), channel="commits", latest=f"{ver} ({c['sha'][:7]})", version=ver, tag=c["sha"], sha=c["sha"],
+                update_available=avail, url=c["url"], notes=c["message"], date=c["date"], ci=state, asset=None)
 
 
 def flavor():
@@ -236,30 +322,50 @@ def verify_stage(stage):
         shutil.rmtree(scratch, ignore_errors=True)
 
 
-def install_server(tag=None, root="/opt/ssc", run=None, log=print):
-    """Install the newest (or the given) release into `root`. Returns the new version. Raises UpdateError and changes nothing
-    if anything looks wrong."""
+def install_server(tag=None, root="/opt/ssc", run=None, log=print, channel=None, sha=None, force=False):
+    """Install the newest commit of the main branch (channel 'commits') or the newest / the given release into `root`. Returns the new
+    version. Raises UpdateError and changes nothing if anything looks wrong."""
     run = run or _run
     root = Path(root)
-    rels = releases()
-    rel = next((r for r in rels if r["tag"] == tag), None) if tag else (rels[0] if rels else None)
-    if not rel:
-        raise UpdateError("no release found")
-    current = ssc_version.VERSION
-    if tag is None and not ssc_version.is_newer(rel["tag"], current):
-        raise UpdateError(f"already up to date ({current})")
-    log(f"Downloading {rel['tag']} ...")
+    channel = "releases" if tag else (channel or default_channel())
+    commit = None
+    if channel == "commits":
+        info = check_commits()
+        commit = sha or info["sha"]
+        if not SHA_RE.match(commit):
+            raise UpdateError("not a commit id")
+        if info["ci"] == "failed" and not force:
+            raise UpdateError(f"the automatic tests of the newest commit ({commit[:7]}) failed - not installing it")
+        if installed_commit(root) == commit:
+            raise UpdateError(f"already up to date ({ssc_version.VERSION}, {commit[:7]})")
+        expect = None
+        url = (f"https://codeload.github.com/{REPO}/tar.gz/{commit}" if not _TEST_ALLOW_LOCAL else f"{api_base()}/tarball/{commit}")
+        label = f"commit {commit[:7]}"
+    else:
+        rels = releases()
+        rel = next((r for r in rels if r["tag"] == tag), None) if tag else (rels[0] if rels else None)
+        if not rel:
+            raise UpdateError("no release found")
+        if tag is None and not ssc_version.is_newer(rel["tag"], ssc_version.VERSION):
+            raise UpdateError(f"already up to date ({ssc_version.VERSION})")
+        expect = rel["version"]
+        url = (f"https://codeload.github.com/{REPO}/tar.gz/refs/tags/{rel['tag']}" if not _TEST_ALLOW_LOCAL else f"{api_base()}/tarball/{rel['tag']}")
+        label = rel["tag"]
+    log(f"Downloading {label} ...")
     work = Path(tempfile.mkdtemp(prefix="ssc-update-", dir=str(root.parent)))
     try:
-        tarball = download(f"https://codeload.github.com/{REPO}/tar.gz/refs/tags/{rel['tag']}" if not _TEST_ALLOW_LOCAL
-                           else f"{api_base()}/tarball/{rel['tag']}", work / "src.tar.gz")
+        tarball = download(url, work / "src.tar.gz")
         stage = work / "stage"
         n = safe_extract(tarball, stage)
         log(f"Unpacked {n} files; checking them ...")
         version = verify_stage(stage)
-        if version != rel["version"]:
-            raise UpdateError(f"the code says it is {version}, but the release is {rel['version']} - stopped")
+        if expect is not None and version != expect:
+            raise UpdateError(f"the code says it is {version}, but the release is {expect} - stopped")
+        if commit and ssc_version.parse(version) and ssc_version.parse(ssc_version.VERSION) and ssc_version.parse(version) < ssc_version.parse(ssc_version.VERSION):
+            raise UpdateError(f"that commit is version {version}, older than the installed {ssc_version.VERSION} - stopped")
         (stage / "VERSION").write_text(version + "\n")
+        if commit:
+            (stage / "COMMIT").write_text(commit + "\n")
         for dirpath, dirs, files in os.walk(stage):
             os.chmod(dirpath, 0o755)
             for f in files:
@@ -276,7 +382,7 @@ def install_server(tag=None, root="/opt/ssc", run=None, log=print):
                 os.rename(prev, root)                       # could not swap: put the old one back
             raise
         run(["systemctl", "restart", "ssc-server"])
-        log(f"Installed {version}. The previous version is kept in {prev} (ssconfig update --rollback).")
+        log(f"Installed {version}{' (' + commit[:7] + ')' if commit else ''}. The previous version is kept in {prev} (ssconfig update --rollback).")
         return version
     finally:
         shutil.rmtree(work, ignore_errors=True)

@@ -42,12 +42,17 @@ def run(cfg, check, request, now=None):
     if not info.get("update_available"):
         _save({"day": day, "target": m.get("target"), "result": "up to date"})
         return "up to date"
-    if m.get("target") == info["latest"]:
-        _save({"day": day, "target": info["latest"], "result": "not retried: an earlier attempt for " + info["latest"] + " did not finish"})
+    target = info.get("tag") or info["latest"]                    # a commit id when following commits, else the release version
+    shown = info["latest"]
+    if info.get("channel") == "commits" and info.get("ci") != "passed":          # never by itself: only a commit whose tests all passed
+        _save({"day": day, "target": m.get("target"), "result": f"waiting: the tests of {shown} are {info.get('ci', 'unknown')}"})
+        return "waiting for the tests"
+    if m.get("target") == target:
+        _save({"day": day, "target": target, "result": "not retried: an earlier attempt for " + shown + " did not finish"})
         return "not retried"
-    _save({"day": day, "target": info["latest"], "result": "installing " + info["latest"], "at": time.time()})
+    _save({"day": day, "target": target, "result": "installing " + shown, "at": time.time()})
     request(["update"])
-    return "installing " + info["latest"]
+    return "installing " + shown
 
 
 def _save(m):

@@ -205,7 +205,8 @@ def make_handler():
             s = self.sess()
             self.enter(s)
             if u.path == "/health":
-                return self.j(200, {"ok": True, "service": "ssc-server", "version": VERSION})
+                import updater
+                return self.j(200, {"ok": True, "service": "ssc-server", "version": VERSION, "commit": updater.installed_commit()[:7]})
             if u.path == "/api/login-info":
                 return self.j(200, {"guest": self.cfg()["web"]["guest_passwordless"], "setup_needed": not auth.has_admin()})
             if u.path == "/login":
@@ -290,9 +291,11 @@ def make_handler():
                     return self.j(502, {"error": str(e)})
                 if not info["update_available"]:
                     return self.j(409, {"error": "already up to date", "current": VERSION})
+                if info.get("ci") == "failed":
+                    return self.j(409, {"error": "the automatic tests of the newest commit failed - not installing it"})
                 request_apply(["update"])
                 auth.audit(auth.db(), s["name"], "update-requested", info["latest"], self.ip())
-                return self.j(200, {"requested": True, "from": VERSION, "to": info["latest"]})
+                return self.j(200, {"requested": True, "from": VERSION, "from_commit": updater.installed_commit()[:7], "to": info["latest"]})
             if u.path == "/api/prefs":
                 s = self.sess()
                 b = self.body()

@@ -60,10 +60,26 @@ class FakeGitHub(http.server.BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass
 
+    head = "a" * 40                 # the newest commit of the fake main branch
+    head_version = NEW
+    runs = [{"status": "completed", "conclusion": "success"}]
+    hits = []
+
     def do_GET(self):
         cls = type(self)
         base = f"http://127.0.0.1:{self.server.server_address[1]}"
-        if self.path.startswith("/repos/") and "/releases" in self.path:
+        cls.hits.append(self.path)
+        if self.path.startswith("/repos/") and self.path.endswith("/commits/main"):
+            body = json.dumps({"sha": cls.head, "html_url": base + "/commit", "commit": {"message": "Fix the thing\n\nlong text", "committer": {"date": "2026-11-28T08:00:00Z"}}}).encode()
+            ctype = "application/json"
+        elif self.path.startswith("/repos/") and "/contents/ssc_version.py" in self.path:
+            import base64
+            body = json.dumps({"content": base64.encodebytes(f'VERSION = "{cls.head_version}"\n'.encode()).decode()}).encode()
+            ctype = "application/json"
+        elif self.path.startswith("/repos/") and "/check-runs" in self.path:
+            body = json.dumps({"check_runs": cls.runs}).encode()
+            ctype = "application/json"
+        elif self.path.startswith("/repos/") and "/releases" in self.path:
             sums = hashlib.sha256(cls.app).hexdigest() if cls.sums_ok else "0" * 64
             assets = [{"name": f"SSC-{NEW}-linux.tar.gz", "size": len(cls.app), "browser_download_url": base + "/dl/linux"},
                       {"name": f"SSC-{NEW}-windows.zip", "size": 1, "browser_download_url": base + "/dl/win"}]
@@ -114,6 +130,7 @@ class Base(unittest.TestCase):
         self._old = (updater.API, updater._TEST_ALLOW_LOCAL, ssc_version.VERSION)
         updater.API, updater._TEST_ALLOW_LOCAL = self.base, True
         FakeGitHub.tarball, FakeGitHub.sums_ok, FakeGitHub.with_sums = make_release_tar(), True, True
+        FakeGitHub.head, FakeGitHub.head_version, FakeGitHub.runs, FakeGitHub.hits = "a" * 40, NEW, [{"status": "completed", "conclusion": "success"}], []
         self.tmp = Path(tempfile.mkdtemp(prefix="ssc-upd-"))
 
     def tearDown(self):
@@ -299,6 +316,144 @@ class ServerInstallTests(Base):
             self.assertEqual(updater.flavor(), "server")
         finally:
             del os.environ["SSC_SERVER_ROOT"]
+
+
+class CommitUpdateTests(Base):
+    """A new commit on the main branch is an update - no release needed."""
+    SHA2 = "b" * 40
+
+    def make_root(self, commit=""):
+        root = self.tmp / "opt" / "ssc"
+        root.mkdir(parents=True)
+        (root / "marker.txt").write_text("old version")
+        (root / "VERSION").write_text("1.0.0-beta.5\n")
+        if commit:
+            (root / "COMMIT").write_text(commit + "\n")
+        return root
+
+    def run_fn(self):
+        self.calls = []
+
+        class R:
+            returncode, stdout, stderr = 0, "", ""
+        return lambda c, **k: self.calls.append(c) or R()
+
+    def test_a_new_commit_is_an_update(self):
+        root = self.make_root("c" * 40)
+        info = updater.check(channel="commits")
+        self.assertEqual(info["channel"], "commits")
+        self.assertEqual((info["sha"], info["tag"]), ("a" * 40, "a" * 40))
+        self.assertTrue(info["update_available"])
+        self.assertEqual(info["notes"], "Fix the thing")                                       # the first line of the commit message
+        self.assertIn(NEW, info["latest"])
+        self.assertIn("aaaaaaa", info["latest"])
+        self.assertEqual(info["ci"], "passed")
+        self.assertEqual(updater.installed_commit(root), "c" * 40)
+        os.environ["SSC_SERVER_ROOT"] = str(root)
+        try:
+            (root / "COMMIT").write_text("a" * 40 + "\n")                                     # already on the newest commit
+            self.assertFalse(updater.check(channel="commits")["update_available"])
+            FakeGitHub.head = self.SHA2
+            self.assertTrue(updater.check(channel="commits")["update_available"])             # and the next commit is an update again
+        finally:
+            del os.environ["SSC_SERVER_ROOT"]
+
+    def test_unknown_installed_commit_is_offered_once(self):
+        os.environ["SSC_SERVER_ROOT"] = str(self.make_root())                                  # installed from a release: no COMMIT file
+        try:
+            self.assertTrue(updater.check(channel="commits")["update_available"])
+            self.assertEqual(updater.installed_commit(), "")
+        finally:
+            del os.environ["SSC_SERVER_ROOT"]
+        root = self.tmp / "opt" / "ssc"
+        updater.install_server(root=str(root), run=self.run_fn(), log=lambda m: None, channel="commits")
+        os.environ["SSC_SERVER_ROOT"] = str(root)
+        try:
+            self.assertFalse(updater.check(channel="commits")["update_available"])            # now it knows where it is
+        finally:
+            del os.environ["SSC_SERVER_ROOT"]
+
+    def test_install_a_commit(self):
+        root = self.make_root("c" * 40)
+        v = updater.install_server(root=str(root), run=self.run_fn(), log=lambda m: None, channel="commits")
+        self.assertEqual(v, NEW)
+        self.assertEqual((root / "COMMIT").read_text().strip(), "a" * 40)
+        self.assertEqual((root / "VERSION").read_text().strip(), NEW)
+        self.assertEqual((self.tmp / "opt" / "ssc.prev" / "COMMIT").read_text().strip(), "c" * 40)       # roll-back copy
+        self.assertIn(["systemctl", "restart", "ssc-server"], self.calls)
+        self.assertTrue(any(h.startswith("/tarball/" + "a" * 40) for h in FakeGitHub.hits))
+        with self.assertRaises(updater.UpdateError) as e:
+            updater.install_server(root=str(root), run=self.run_fn(), log=lambda m: None, channel="commits")
+        self.assertIn("up to date", str(e.exception))
+
+    def test_a_commit_whose_tests_failed_is_not_installed(self):
+        root = self.make_root("c" * 40)
+        FakeGitHub.runs = [{"status": "completed", "conclusion": "success"}, {"status": "completed", "conclusion": "failure"}]
+        self.assertEqual(updater.check(channel="commits")["ci"], "failed")
+        with self.assertRaises(updater.UpdateError) as e:
+            updater.install_server(root=str(root), run=self.run_fn(), log=lambda m: None, channel="commits")
+        self.assertIn("failed", str(e.exception))
+        self.assertEqual((root / "marker.txt").read_text(), "old version")
+        self.assertNotIn(["systemctl", "restart", "ssc-server"], self.calls)
+        updater.install_server(root=str(root), run=self.run_fn(), log=lambda m: None, channel="commits", force=True)       # an administrator can still insist
+        self.assertEqual((root / "COMMIT").read_text().strip(), "a" * 40)
+
+    def test_ci_states(self):
+        ok, bad, wait = {"status": "completed", "conclusion": "success"}, {"status": "completed", "conclusion": "failure"}, {"status": "in_progress", "conclusion": None}
+        skipped, cancelled = {"status": "completed", "conclusion": "skipped"}, {"status": "completed", "conclusion": "cancelled"}
+        for runs, want in (([ok], "passed"), ([ok, skipped], "passed"), ([ok, wait], "pending"), ([ok, bad], "failed"), ([wait, bad], "failed"),
+                           ([], "unknown"), ([cancelled], "unknown"), ([skipped], "unknown"), ([ok, cancelled], "passed")):
+            FakeGitHub.runs = runs
+            self.assertEqual(updater.ci_state("a" * 40), want, runs)
+
+    def test_ci_unknown_when_github_does_not_answer(self):
+        updater.API = self.base + "/nothing-here"
+        self.assertEqual(updater.ci_state("a" * 40), "unknown")
+
+    def test_a_broken_commit_changes_nothing(self):
+        for label, tar in (("syntax error", make_release_tar(broken=True)), ("missing file", make_release_tar(drop="server/ssconfig.py"))):
+            FakeGitHub.tarball = tar
+            root = self.tmp / "opt" / "ssc" if (self.tmp / "opt" / "ssc").exists() else self.make_root("c" * 40)
+            with self.assertRaises(updater.UpdateError, msg=label):
+                updater.install_server(root=str(root), run=self.run_fn(), log=lambda m: None, channel="commits")
+            self.assertEqual((root / "marker.txt").read_text(), "old version", label)
+            self.assertEqual((root / "COMMIT").read_text().strip(), "c" * 40, label)
+            self.assertNotIn(["systemctl", "restart", "ssc-server"], self.calls, label)
+
+    def test_never_goes_back_to_an_older_version(self):
+        FakeGitHub.tarball = make_release_tar(version="0.9.0")
+        FakeGitHub.head_version = "0.9.0"
+        root = self.make_root("c" * 40)
+        with self.assertRaises(updater.UpdateError) as e:
+            updater.install_server(root=str(root), run=self.run_fn(), log=lambda m: None, channel="commits")
+        self.assertIn("older", str(e.exception))
+        self.assertEqual((root / "marker.txt").read_text(), "old version")
+
+    def test_bad_answers_from_github_are_refused(self):
+        FakeGitHub.head = "not-a-sha"
+        with self.assertRaises(updater.UpdateError):
+            updater.check(channel="commits")
+        with self.assertRaises(updater.UpdateError):
+            updater.install_server(root=str(self.make_root()), run=self.run_fn(), log=lambda m: None, channel="commits", sha="../../etc")
+
+    def test_the_channel_setting_picks_the_way(self):
+        real_flavor = updater.flavor
+        updater.flavor = lambda: "server"
+        try:
+            import serverconf
+            old = serverconf.load
+            serverconf.load = lambda: serverconf.validate({"update": {"channel": "releases"}})
+            self.assertEqual(updater.default_channel(), "releases")
+            self.assertEqual(updater.check()["channel"], "releases")
+            serverconf.load = lambda: serverconf.validate({})
+            self.assertEqual(updater.default_channel(), "commits")
+            self.assertEqual(updater.check()["channel"], "commits")
+            serverconf.load = old
+        finally:
+            updater.flavor = real_flavor
+        self.assertEqual(updater.default_channel(), "releases")                                # a desktop app / source run never follows commits
+        with self.assertRaises(ValueError):
+            __import__("serverconf").validate({"update": {"channel": "nightly"}})
 
 
 if __name__ == "__main__":

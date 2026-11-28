@@ -80,6 +80,11 @@ test "$(curl -s -o /dev/null -w '%{http_code}' -H 'Content-Type: application/jso
 test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18080/data.json)" = 401
 test "$(curl -s -o /dev/null -w '%{http_code}' -c $W/jar2 -H 'Content-Type: application/json' -d '{"name":"gast","password":"guestpass"}' http://127.0.0.1:18080/api/login)" = 200
 echo "WEB + AUTH OK (admin and the account from the SSC Install file)"
+# the image knows which commit it was built from (the updater offers every later commit as an update)
+if [ -n "${GITHUB_SHA:-}" ]; then
+  curl -fsS http://127.0.0.1:18080/health | tee $W/health.json; echo
+  grep -q "\"commit\": \"${GITHUB_SHA:0:7}\"" $W/health.json || { echo "THE IMAGE DOES NOT REPORT ITS COMMIT (expected ${GITHUB_SHA:0:7})"; exit 1; }
+fi
 # the console: a login must exist on tty1 (getty), and with auto-login the admin must really be logged in there
 python3 - "$W/jar" "${AUTOLOGIN:-false}" <<'PY'
 import json, subprocess, sys, time

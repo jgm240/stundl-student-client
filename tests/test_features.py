@@ -711,6 +711,19 @@ class AutoUpdateTests(unittest.TestCase):
         self.assertEqual(len(reqs), 1)
         self.assertEqual(autoupdate.run(self.cfg, lambda: dict(info, latest="1.3.0"), reqs.append, self.at(4, 0, 25)), "installing 1.3.0")   # a newer one is tried
 
+    def test_commits_are_only_installed_by_themselves_when_their_tests_passed(self):
+        reqs = []
+        info = lambda ci: {"update_available": True, "latest": "1.2.0 (abc1234)", "tag": "a" * 40, "channel": "commits", "ci": ci}
+        for ci in ("failed", "pending", "unknown"):
+            self.assertEqual(autoupdate.run(self.cfg, lambda ci=ci: info(ci), reqs.append, self.at(4)), "waiting for the tests", ci)
+            self.assertIn(ci, autoupdate.last()["result"])
+        self.assertEqual(reqs, [])
+        self.assertEqual(autoupdate.run(self.cfg, lambda: info("passed"), reqs.append, self.at(4, 0, 24)), "installing 1.2.0 (abc1234)")
+        self.assertEqual(reqs, [["update"]])
+        info2 = lambda: dict(info("passed"), tag="b" * 40, latest="1.2.0 (bbbbbbb)")
+        self.assertEqual(autoupdate.run(self.cfg, info2, reqs.append, self.at(4, 0, 25)), "installing 1.2.0 (bbbbbbb)")             # the next commit: tried again
+        self.assertEqual(autoupdate.run(self.cfg, info2, reqs.append, self.at(4, 0, 26)), "not retried")                              # the same one: not every night
+
     def test_nothing_new_and_no_internet(self):
         reqs = []
         self.assertEqual(autoupdate.run(self.cfg, lambda: {"update_available": False}, reqs.append, self.at(4)), "up to date")

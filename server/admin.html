@@ -59,8 +59,9 @@ Overview:async()=>{const H=await api("/api/admin/health").catch(()=>({alerts:[],
  <div class="row"><button class="b p" onclick="run(()=>api('/api/admin/sync',{}),'Sync started')">Sync now</button></div>${apply()}
  <h2>Updates</h2><div class="card"><div class="kv"><span>Installed version</span><b>${esc(S.version)}</b></div><div id="upd" class="sub"></div>
  <div class="row"><button class="b" onclick="chkUpd()">Check for updates</button></div>
+ <div class="row"><div><label>Updates follow</label><select id="uch" onchange="cfg({update:{channel:this.value}},'Saved')"><option value="commits" ${C.update.channel==="commits"?"selected":""}>Every new commit (no release needed)</option><option value="releases" ${C.update.channel==="releases"?"selected":""}>Published releases only</option></select></div></div>
  <div class="row"><label style="display:inline-flex;gap:8px;align-items:center;color:var(--text)">${chk("aue",C.autoupdate.enabled)} Install new versions by itself every day at</label><input id="aut" type="time" value="${esc(C.autoupdate.time)}"><button class="b p" onclick="saveAutoUpd()">Save</button></div>
- <p class="sub">${S.autoupdate?"Last automatic check: "+esc(S.autoupdate.day)+" - "+esc(S.autoupdate.result||""):"Updates come from this project's GitHub releases."} If a new version does not start, the old one is put back at once (and that version is not tried again). By hand: <code>ssconfig update --rollback</code>.</p></div>
+ <p class="sub">${S.autoupdate?"Last automatic check: "+esc(S.autoupdate.day)+" - "+esc(S.autoupdate.result||""):"Updates come from this project's GitHub releases."} Only a commit whose automatic tests passed is installed by itself. If a new version does not start, the old one is put back at once (and that version is not tried again). By hand: <code>ssconfig update --rollback</code>.</p></div>
  <h2>Wall-display links</h2><div class="card">${S.links.enabled?(S.links.urls.map(u=>`<div class="kv"><span>${esc(u.host)}</span><div><code>${esc(u.browser)}</code><br><code>${esc(u.wall)}</code></div></div>`).join("")||"<span class='sub'>No network address yet.</span>")
  +`<div class="row"><button class="b" onclick="if(confirm('Create a new link? Displays using the old one stop working.'))run(()=>api('/api/admin/links/rotate',{}),'New link created')">New link</button>
  <span class="sub">${S.links.long?"Long links required (64 characters).":"Standard links (32 characters)."} ${S.links.expired?"<b style='color:var(--bad)'>The link has expired - make a new one.</b>":S.links.expires_at?"Valid until "+when(S.links.expires_at)+".":""} Shows the first child only.</span></div>`:"<span class='sub'>Link access is turned off (Web & links).</span>"}</div>`},
@@ -239,12 +240,14 @@ async function chkUpd(){const el=$("#upd");el.textContent="Checking…";
   try{const r=await fetch("/api/update/check"),j=await r.json();
     if(!r.ok){el.textContent=j.error||"Could not check";return}
     if(!j.update_available){el.textContent="You're up to date.";return}
+    if(j.channel==="commits"){const ci={passed:"tests passed",failed:"tests FAILED",pending:"tests still running",unknown:"no test result"}[j.ci]||"";
+      el.innerHTML="A new version is available: <b>"+esc(j.notes||"new commit")+"</b> ("+esc(j.latest)+", "+esc(ci)+"). <a href='"+esc(j.url)+"' target='_blank' rel='noopener'>See the change</a> "+(j.ci==="failed"?"":"<button class='b p' onclick='instUpd()'>Install update</button>");return}
     el.innerHTML="Version "+esc(j.latest)+" is available. <a href='"+esc(j.url)+"' target='_blank' rel='noopener'>Release notes</a> <button class='b p' onclick='instUpd()'>Install update</button>"}
   catch(e){el.textContent="Could not check for updates"}}
 async function instUpd(){if(!confirm("Download and install the new version now? The web service restarts."))return;
   const el=$("#upd");try{const r=await fetch("/api/update/install",{method:"POST",headers:{"Content-Type":"application/json"},body:"{}"}),j=await r.json();
     if(!r.ok){el.textContent=j.error||"failed";return}el.textContent="Updating - this page reloads when the server is back…";
-    const cur=j.from,t=setInterval(async()=>{try{const h=await (await fetch("/health")).json();if(h.version&&h.version!==cur){clearInterval(t);location.reload()}}catch(e){}},3000)}
+    const cur=j.from,cc=j.from_commit||"",t=setInterval(async()=>{try{const h=await (await fetch("/health")).json();if(h.version&&(h.version!==cur||(h.commit||"")!==cc)){clearInterval(t);location.reload()}}catch(e){}},3000)}
   catch(e){el.textContent="failed"}}
 function saveSched(){const days=["mon","tue","wed","thu","fri","sat","sun"].filter(d=>$("#scd-"+d).checked);
   cfg({schedule:{enabled:$("#sce").checked,off:$("#sco").value,on:$("#scn").value,mode:$("#scm").value,days,spin_down_disks:$("#scdk").checked,screen_off:$("#scsc").checked,stop_ssh:$("#scss").checked}},"Saved - applying…")}
