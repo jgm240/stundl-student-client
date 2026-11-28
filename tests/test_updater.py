@@ -23,7 +23,7 @@ sys.path.insert(0, str(ROOT / "server"))
 import ssc_version  # noqa: E402
 import updater  # noqa: E402
 
-NEW = "1.0.0-beta.7"
+NEW = "1.0.1"
 
 
 def make_release_tar(version=NEW, extra=None, broken=False, drop=None):
